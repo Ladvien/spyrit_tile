@@ -9,14 +9,14 @@ from mathutils import Vector, Matrix, Quaternion
 from mathutils.bvhtree import BVHTree
 from mathutils.geometry import intersect_line_plane, distance_point_to_plane
 
-from rx import Observable
-from sprytile_tools.tool_build import ToolBuild
-from sprytile_tools.tool_paint import ToolPaint
-from sprytile_tools.tool_fill import ToolFill
-import sprytile_uv
-from sprytile_uv import UvDataLayers
-import sprytile_utils
-import sprytile_preview
+from .sprytile_event import EventSource
+from .sprytile_tools.tool_build import ToolBuild
+from .sprytile_tools.tool_paint import ToolPaint
+from .sprytile_tools.tool_fill import ToolFill
+from . import sprytile_uv
+from .sprytile_uv import UvDataLayers
+from . import sprytile_utils
+from . import sprytile_preview
 
 
 class DataObjectDict(dict):
@@ -456,7 +456,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
             el.index_update()
             el.ensure_lookup_table()
 
-        bmesh.update_edit_mesh(context.object.data, True, True)
+        bmesh.update_edit_mesh(context.object.data, loop_triangles=True, destructive=True)
 
         # Update the collision BVHTree with new data
         self.refresh_mesh = True
@@ -831,13 +831,18 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         self.update_bmesh_tree(context)
         self.refresh_mesh = False
 
-        # Setup Rx Observer and Observables
-        self.rx_observer = None
-        observable_source = Observable.create(self.setup_rx_observer)
-        # Setup multi casting Observable
-        self.rx_source = observable_source.publish().auto_connect(1)
+        # modal() assigns both, but it can return early (mouse over the Sprytile
+        # UI, outside the region) or exit before ever reaching those lines, and
+        # exit_modal reads them on the way out
+        self.draw_preview = False
+        self.rx_data = None
 
-        # Tools receive events from the Observable
+        # Setup event observer and source
+        self.rx_observer = None
+        # Multi casting source, hands out its observer on the first subscribe
+        self.rx_source = EventSource(self.setup_rx_observer)
+
+        # Tools receive events from the source
         self.tools = {
             "build": ToolBuild(self, self.rx_source),
             "paint": ToolPaint(self, self.rx_source),
@@ -927,7 +932,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         self.tree = None
         self.tools = None
         if context.object.mode == 'EDIT':
-            bmesh.update_edit_mesh(context.object.data, True, True)
+            bmesh.update_edit_mesh(context.object.data, loop_triangles=True, destructive=True)
 
 
 # module classes

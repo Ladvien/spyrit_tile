@@ -2,10 +2,10 @@ import bpy
 import bmesh
 from mathutils import Vector, Matrix, Quaternion
 
-import sprytile_utils
-import sprytile_uv
-import sprytile_preview
-import sprytile_modal
+from .. import sprytile_utils
+from .. import sprytile_uv
+from .. import sprytile_preview
+from .. import sprytile_modal
 
 
 class ToolPaint:

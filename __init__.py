@@ -2,57 +2,33 @@ bl_info = {
     "name": "Sprytile Painter",
     "author": "Jeiel Aranal",
     # Final version number must be two numerals to support x.x.00
-    "version": (0, 5, 20),
-    "blender": (2, 80, 0),
+    "version": (0, 6, 00),
+    "blender": (4, 5, 0),
     "description": "A utility for creating tile based low spec scenes with paint/map editor tools",
     "location": "View3D > UI panel > Sprytile",
-    "wiki_url": "http://itch.sprytile.xyz",
+    "doc_url": "http://itch.sprytile.xyz",
     "tracker_url": "https://github.com/ChemiKhazi/Sprytile/issues",
     "category": "Paint"
 }
 
-# Put Sprytile directory is sys.path so modules can be loaded
 import os
-import sys
-import inspect
-cmd_subfolder = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile(inspect.currentframe()))[0]))
-if cmd_subfolder not in sys.path:
-    sys.path.insert(0, cmd_subfolder)
-
-locals_list = locals()
-if "bpy" in locals_list:
-    from importlib import reload
-    #reload(addon_updater_ops)
-    reload(sprytile_gui)
-    reload(sprytile_modal)
-    reload(sprytile_panel)
-    reload(sprytile_utils)
-    reload(sprytile_uv)
-    reload(tool_build)
-    reload(tool_paint)
-    reload(tool_fill)
-else:
-    from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv
-    from sprytile_tools import *
 
 import bpy
 import bpy.utils.previews
 from bpy.app.handlers import persistent
-#from . import addon_updater_ops
-from bpy.utils.toolsystem import ToolDef
 from bpy.props import *
 import rna_keymap_ui
+
+from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv
+from .sprytile_tools import tool_build, tool_paint, tool_fill
 
 
 class SprytileSceneSettings(bpy.types.PropertyGroup):
     def set_normal(self, value):
-        if "lock_normal" not in self.keys():
-            self["lock_normal"] = False
-
-        if self["lock_normal"] is True:
+        if self.get("lock_normal", False) is True:
             return
-        if self["normal_mode"] == value:
-            self["lock_normal"] = not self["lock_normal"]
+        if self.get("normal_mode", 3) == value:
+            self["lock_normal"] = not self.get("lock_normal", False)
             return
         self["normal_mode"] = value
         self["lock_normal"] = True
@@ -64,9 +40,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
         
 
     def get_normal(self):
-        if "normal_mode" not in self.keys():
-            self["normal_mode"] = 3
-        return self["normal_mode"]
+        return self.get("normal_mode", 3)
 
     normal_mode : EnumProperty(
         items=[
@@ -116,10 +90,6 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
     )
 
     def set_layer(self, value):
-        keys = self.keys()
-        if "work_layer" not in keys:
-            self["work_layer"] = 1
-
         current_value = self.get_layer()
         value = list(value)
         for idx in range(len(value)):
@@ -132,13 +102,9 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
                 break
 
     def get_layer(self):
-        keys = self.keys()
-        if "work_layer" not in keys:
-            self["work_layer"] = 1
-
         out_value = [False, False]
         index_value_lookup = 1, 2
-        set_idx = index_value_lookup.index(self["work_layer"])
+        set_idx = index_value_lookup.index(self.get("work_layer", 1))
         out_value[set_idx] = True
         return out_value
 
@@ -278,9 +244,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
         self.set_align_toggle(value, "bottom")
 
     def get_align_toggle(self, row):
-        if "paint_align" not in self.keys():
-            self["paint_align"] = 5
-        align = self["paint_align"]
+        align = self.get("paint_align", 5)
         if row == 'top':
             return align == 1, align == 2, align == 3
         if row == 'middle':
@@ -402,9 +366,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
             bpy.ops.sprytile.reload_auto('INVOKE_REGION_WIN')
 
     def get_reload(self):
-        if "auto_reload" not in self.keys():
-            self["auto_reload"] = False
-        return self["auto_reload"]
+        return self.get("auto_reload", False)
 
     auto_reload: bpy.props.BoolProperty(
         name="Auto",
@@ -488,22 +450,16 @@ class SprytileMaterialGridSettings(bpy.types.PropertyGroup):
 
     def set_padding(self, value):
         current_padding = self.get_padding()
-        if "grid" not in self.keys():
-            self["grid"] = (32, 32)
+        current_grid = self.get("grid", (32, 32))
         padding_delta = [ (value[0] - current_padding[0]) * 2, (value[1] - current_padding[1]) * 2]
-        new_grid = [self["grid"][0] - padding_delta[0], self["grid"][1] - padding_delta[1]]
+        new_grid = [current_grid[0] - padding_delta[0], current_grid[1] - padding_delta[1]]
         if new_grid[0] < 1 or new_grid[1] < 1:
             return
         self["grid"] = (new_grid[0], new_grid[1])
         self["padding"] = value
 
     def get_padding(self):
-        if "padding" not in self.keys():
-            try:
-                self["padding"] = (0, 0)
-            except:
-                return (0, 0)
-        return self["padding"]
+        return self.get("padding", (0, 0))
 
     padding : IntVectorProperty(
         name="Padding",
@@ -564,8 +520,7 @@ class SprytileMaterialData(bpy.types.PropertyGroup):
             self['is_expanded'] = True
 
     def get_expanded(self):
-        self.expanded_default()
-        return self['is_expanded']
+        return self.get('is_expanded', True)
 
     def set_expanded(self, value):
         self.expanded_default()
@@ -634,9 +589,7 @@ class SprytileGridDisplay(bpy.types.PropertyGroup):
 
 class SprytileGridList(bpy.types.PropertyGroup):
     def get_idx(self):
-        if "idx" not in self.keys():
-            self["idx"] = 0
-        return self["idx"]
+        return self.get("idx", 0)
 
     def set_idx(self, value):
         # If the selected index is a material entry
@@ -916,87 +869,69 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
         #    col.context_pointer_set("keymap", km)
         #    rna_keymap_ui.draw_kmi([], kc, km, kmi, col, 0)
 
-        #addon_updater_ops.update_settings_ui(self, context)
+
+# Tools are registered through bpy.utils.register_tool / WorkSpaceTool.
+# The old code built bl_ui ToolDefs by hand and spliced them into the
+# private ToolSelectPanelHelper._tools list, which is not a supported API.
+
+class SprytileWorkSpaceTool(bpy.types.WorkSpaceTool):
+    bl_space_type = 'VIEW_3D'
+    bl_context_mode = 'EDIT_MESH'
+    bl_widget = "VIEW3D_GGT_sprytile_gui"
 
 
-@ToolDef.from_fn
-def toolbar_build():
-    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-
-    return dict(
-        idname="sprytile.tool_build",
-        label="Sprytile Build",
-        description=(
-            "Make new tiles"
-        ),
-        icon=os.path.join(icons_dir, "sprytile.build_tool"),
-        keymap=sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['MAKE_FACE'],
-        widget="VIEW3D_GGT_sprytile_gui",
-        cursor="KNIFE"
-    )
+def tool_icon(name):
+    return os.path.join(os.path.dirname(__file__), "icons", name)
 
 
-@ToolDef.from_fn
-def toolbar_paint():
-    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-
-    return dict(
-        idname="sprytile.tool_paint",
-        label="Sprytile Paint",
-        description=(
-            "Paint existing tiles/faces"
-        ),
-        icon=os.path.join(icons_dir, "sprytile.paint_tool"),
-        keymap=sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['PAINT'],
-        widget="VIEW3D_GGT_sprytile_gui",
-        cursor="PAINT_BRUSH"
-    )
+class SprytileToolBuild(SprytileWorkSpaceTool):
+    bl_idname = "sprytile.tool_build"
+    bl_label = "Sprytile Build"
+    bl_description = "Make new tiles"
+    bl_icon = tool_icon("sprytile.build_tool")
+    bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['MAKE_FACE']
+    bl_cursor = 'KNIFE'
 
 
-@ToolDef.from_fn
-def toolbar_fill():
-    def draw_settings(context, layout, tool):
-        pass
-
-    icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-
-    return dict(
-        idname="sprytile.tool_fill",
-        label="Sprytile Fill",
-        description=(
-            "Fill existing tiles/faces"
-        ),
-        icon=os.path.join(icons_dir, "sprytile.fill_tool"),
-        keymap=sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['FILL'],
-        widget="VIEW3D_GGT_sprytile_gui",
-        cursor="SCROLL_XY"
-    )
+class SprytileToolPaint(SprytileWorkSpaceTool):
+    bl_idname = "sprytile.tool_paint"
+    bl_label = "Sprytile Paint"
+    bl_description = "Paint existing tiles/faces"
+    bl_icon = tool_icon("sprytile.paint_tool")
+    bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['PAINT']
+    bl_cursor = 'PAINT_BRUSH'
 
 
-def get_tool_list(space_type, context_mode):
-    from bl_ui.space_toolsystem_common import ToolSelectPanelHelper
-    cls = ToolSelectPanelHelper._tool_class_from_space_type(space_type)
-    return cls._tools[context_mode]
+class SprytileToolFill(SprytileWorkSpaceTool):
+    bl_idname = "sprytile.tool_fill"
+    bl_label = "Sprytile Fill"
+    bl_description = "Fill existing tiles/faces"
+    bl_icon = tool_icon("sprytile.fill_tool")
+    bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['FILL']
+    bl_cursor = 'SCROLL_XY'
+
+
+tool_classes = (
+    SprytileToolBuild,
+    SprytileToolPaint,
+    SprytileToolFill,
+)
 
 
 def register_tools():
-    tools = get_tool_list('VIEW_3D', 'EDIT_MESH')
-
-    for index, tool in enumerate(tools, 1):
-        if isinstance(tool, ToolDef) and tool.label == "Transform":
-            break
-
-    tools[:index] += None, toolbar_build, toolbar_paint, toolbar_fill
+    # Sits right after the transform tools, where Sprytile has always put itself
+    previous = "builtin.transform"
+    for index, tool in enumerate(tool_classes):
+        bpy.utils.register_tool(tool, after={previous}, separator=index == 0)
+        previous = tool.bl_idname
 
 
 def unregister_tools():
-    tools = get_tool_list('VIEW_3D', 'EDIT_MESH')
-
-    index = tools.index(toolbar_build) - 1 # None
-    tools.pop(index)
-    tools.remove(toolbar_build)
-    tools.remove(toolbar_paint)
-    tools.remove(toolbar_fill)
+    for tool in reversed(tool_classes):
+        try:
+            bpy.utils.unregister_tool(tool)
+        except Exception as err:
+            print("Sprytile: could not unregister tool %s: %s" % (tool.bl_idname, err))
 
 
 def generate_tool_keymap(keyconfig, paint_mode):
@@ -1033,13 +968,19 @@ def setup_keymap():
 
 
 def teardown_keymap():
-    for keymap in sprytile_modal.VIEW3D_OP_SprytileModalTool.addon_keymaps:
-        bpy.context.window_manager.keyconfigs.addon.keymaps.remove(keymap)
-    sprytile_modal.VIEW3D_OP_SprytileModalTool.addon_keymaps.clear()
+    # bpy.utils.unregister_tool already drops the keymaps a tool names, so only
+    # remove what is still there. Removing a keymap twice raises.
+    win_mgr = bpy.context.window_manager
 
-    for keymap in sprytile_modal.VIEW3D_OP_SprytileModalTool.default_keymaps:
-        bpy.context.window_manager.keyconfigs.default.keymaps.remove(keymap)
-    sprytile_modal.VIEW3D_OP_SprytileModalTool.default_keymaps.clear()
+    for keymaps, key_config in (
+            (sprytile_modal.VIEW3D_OP_SprytileModalTool.addon_keymaps, win_mgr.keyconfigs.addon),
+            (sprytile_modal.VIEW3D_OP_SprytileModalTool.default_keymaps, win_mgr.keyconfigs.default),
+    ):
+        if key_config is not None:
+            for keymap in keymaps:
+                if key_config.keymaps.get(keymap.name) is not None:
+                    key_config.keymaps.remove(keymap)
+        keymaps.clear()
 
 
 # module classes
@@ -1083,8 +1024,6 @@ def sprytile_load_handler(dummy):
             sprytile_data.world_pixels = addon_prefs.default_pixel_density
 
 def register():
-    #addon_updater_ops.register(bl_info)
-
     for cl in classes:
         bpy.utils.register_class(cl)
 
@@ -1092,27 +1031,27 @@ def register():
         submod.register()
 
     PROP_OP_SprytilePropsSetup.props_setup()
-    register_tools()
+    # Keymaps first, the tools refer to them by name
     setup_keymap()
+    register_tools()
 
     bpy.app.handlers.load_post.append(sprytile_load_handler)
 
 
 def unregister():
-    teardown_keymap()
+    # Mirror of register, drop the tools before the keymaps they point at
     unregister_tools()
+    teardown_keymap()
     PROP_OP_SprytilePropsTeardown.props_teardown()
+
+    if sprytile_load_handler in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(sprytile_load_handler)
 
     for cl in classes:
         bpy.utils.unregister_class(cl)
 
     for submod in submodules:
         submod.unregister()
-
-    # Unregister self from sys.path as well
-    cmd_subfolder = os.path.realpath(os.path.abspath(os.path.split(inspect.getfile(inspect.currentframe()))[0]))
-    if cmd_subfolder in sys.path:
-        sys.path.remove(cmd_subfolder)
 
 
 if __name__ == "__main__":

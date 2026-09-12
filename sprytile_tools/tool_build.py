@@ -3,9 +3,9 @@ from math import floor, ceil
 from mathutils import Vector, Quaternion
 from mathutils.geometry import distance_point_to_plane
 
-import sprytile_utils
-import sprytile_uv
-import sprytile_preview
+from .. import sprytile_utils
+from .. import sprytile_uv
+from .. import sprytile_preview
 
 class ToolBuild:
     modal = None
