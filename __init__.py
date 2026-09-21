@@ -673,6 +673,20 @@ class PROP_OP_SprytilePropsTeardown(bpy.types.Operator):
         del bpy.types.Object.sprytile_gridid
 
 
+def palette_margin_update(self, context):
+    """Nudge the viewport so the new margin is applied right away.
+
+    The margins are boundaries, not a position: the palette only moves when it
+    would otherwise sit inside one. calc_palette_pos does that clamping and
+    stores the result, this just makes sure a redraw happens without waiting
+    for the next mouse move.
+    """
+    for window in context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type == 'VIEW_3D':
+                area.tag_redraw()
+
+
 class SprytileAddonPreferences(bpy.types.AddonPreferences):
     bl_idname = __package__
 
@@ -701,6 +715,33 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
         description="How many pixels are displayed in one world unit",
         default=32,
         min=8
+    )
+
+    palette_size_percent: bpy.props.IntProperty(
+        name="Palette Size",
+        description="How much of the free viewport space the tile palette fills when it is first fitted, in percent",
+        min=10,
+        max=90,
+        default=50,
+        subtype='PERCENTAGE',
+    )
+
+    palette_pad_left: bpy.props.IntProperty(
+        name="Palette Left Margin",
+        description="Extra space between the left edge of the viewport and the tile palette.\nThe toolbar width is already accounted for, use this to push the palette further right",
+        min=0,
+        soft_max=400,
+        default=0,
+        update=palette_margin_update,
+    )
+
+    palette_pad_top: bpy.props.IntProperty(
+        name="Palette Top Margin",
+        description="Extra space between the top of the viewport and the tile palette.\nThe header heights are already accounted for",
+        min=0,
+        soft_max=400,
+        default=0,
+        update=palette_margin_update,
     )
 
     default_grid: bpy.props.IntVectorProperty(
@@ -851,6 +892,17 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
 
         col = split.column()
         col.prop(self, "auto_adjust_viewport_shading")
+
+        row = box.row()
+        split = row.split(factor=size_left_col)
+
+        col = split.column()
+        col.label(text="Tile Palette:")
+
+        col = split.column(align=True)
+        col.prop(self, "palette_size_percent")
+        col.prop(self, "palette_pad_left")
+        col.prop(self, "palette_pad_top")
 
         #box = layout.box()
         #box.label(text = "Keyboard Shortcuts")

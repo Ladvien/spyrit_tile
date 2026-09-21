@@ -40,6 +40,61 @@ def get_build_vertices(position, x_vector, y_vector, up_vector, right_vector):
     return face_order
 
 
+def prune_textureless_grids(context):
+    """Drop Sprytile entries for materials that have no image texture node.
+
+    Those cannot act as a tileset, so the entry is dead weight the user cannot
+    get rid of by hand: the "add missing materials" pass in validate_grids
+    recreated it every time. Blender's default "Material" is the usual case.
+
+    Kept separate from validate_grids so it can run on tool start without that
+    operator's side effect of reassigning the object's active grid.
+    """
+    mat_list = bpy.data.materials
+    mat_data_list = context.scene.sprytile_mats
+
+    remove_idx = []
+    for idx, mat_data in enumerate(mat_data_list.values()):
+        mat_idx = mat_list.find(mat_data.mat_id)
+        if mat_idx < 0:
+            continue
+        if get_material_texture_node(mat_list[mat_idx]) is None:
+            remove_idx.append(idx)
+
+    if not remove_idx:
+        return False
+
+    for idx in reversed(remove_idx):
+        mat_data_list.remove(idx)
+    bpy.ops.sprytile.build_grid_list()
+    return True
+
+
+def mouse_over_ui_region(context, event):
+    """True when the cursor sits over one of Blender's own panels.
+
+    With region overlap the WINDOW region runs underneath the toolbar, sidebar
+    and headers, so anything Sprytile draws or handles there would otherwise
+    swallow the clicks meant for their buttons. Window space coordinates are
+    used because every region shares them.
+    """
+    area = context.area
+    if area is None or event is None:
+        return False
+
+    mouse_x, mouse_y = event.mouse_x, event.mouse_y
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            continue
+        # Collapsed regions report a size of 1
+        if region.width <= 1 or region.height <= 1:
+            continue
+        if (region.x <= mouse_x < region.x + region.width and
+                region.y <= mouse_y < region.y + region.height):
+            return True
+    return False
+
+
 def get_ortho2D_matrix(left, right, bottom, top):
     rl = right - left
     rl2 = right + left
@@ -1118,6 +1173,12 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
             if (mat.mat_id == "Dots Stroke"):
                 remove_idx.append(idx)
                 continue
+            # A material with no image texture node cannot act as a tileset, so
+            # an entry for it is dead weight the user cannot get rid of: it was
+            # recreated by the loop below on every validate.
+            if get_material_texture_node(mat_list[mat_idx]) is None:
+                remove_idx.append(idx)
+                continue
             if mat_list[mat_idx].users == 0:
                 remove_idx.append(idx)
             for grid in mat.grids:
@@ -1136,6 +1197,11 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
                 if mat_data.mat_id == mat.name:
                     is_mat_valid = True
                     break
+            # Only materials that carry an image texture node can be tilesets.
+            # Without this every material in the file, including Blender's
+            # default "Material", showed up in the Sprytile list permanently.
+            if get_material_texture_node(mat) is None:
+                continue
             if is_mat_valid is False and mat.name != "Dots Stroke":
                 mat_data_entry = mat_data_list.add()
                 mat_data_entry.mat_id = mat.name
@@ -1188,6 +1254,7 @@ class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
 class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
     bl_idname = "sprytile.rotate_left"
     bl_label = "Rotate Sprytile Left"
+    bl_description = "Rotate the tile 90 degrees counter clockwise"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -1204,6 +1271,7 @@ class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
 class UTIL_OP_SprytileRotateRight(bpy.types.Operator):
     bl_idname = "sprytile.rotate_right"
     bl_label = "Rotate Sprytile Right"
+    bl_description = "Rotate the tile 90 degrees clockwise"
 
     def execute(self, context):
         return self.invoke(context, None)

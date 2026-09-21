@@ -171,6 +171,10 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
     # Tileset size the stored zoom was calculated for, so a different sized
     # tileset gets a fresh zoom instead of inheriting one meant for the old one
     zoom_display_size = None
+    # Margin preference values the stored palette position already accounts for
+    applied_margin_prefs = None
+    # Whether the palette has been anchored to its corner in this session
+    anchored_this_session = False
 
     build_previews = {
         'MAKE_FACE' : ToolBuild,
@@ -393,6 +397,11 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         return VIEW3D_OP_SprytileGui.clamp_zoom(context, zoom)
 
     @staticmethod
+    def mouse_over_ui_region(context, event):
+        """See sprytile_utils.mouse_over_ui_region, kept here for convenience."""
+        return sprytile_utils.mouse_over_ui_region(context, event)
+
+    @staticmethod
     def get_region_padding(context):
         """Space the palette has to stay clear of, per edge.
 
@@ -426,7 +435,23 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             elif region.alignment == 'BOTTOM':
                 padding['bottom'] += region.height
 
+        # User configurable extra room, on top of the measured panels
+        try:
+            addon_prefs = context.preferences.addons[__package__].preferences
+            padding['left'] += max(0, addon_prefs.palette_pad_left)
+            padding['top'] += max(0, addon_prefs.palette_pad_top)
+        except (KeyError, AttributeError):
+            pass
+
         return padding
+
+    @staticmethod
+    def get_available_area(context):
+        """Viewport space left for the palette once the panels are accounted for."""
+        region = context.region
+        padding = VIEW3D_OP_SprytileGui.get_region_padding(context)
+        return (region.width - padding['left'] - padding['right'],
+                region.height - padding['top'] - padding['bottom'])
 
     @staticmethod
     def clamp_zoom(context, zoom):
@@ -439,10 +464,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if display_size[0] <= 0 or display_size[1] <= 0:
             return zoom
 
-        region = context.region
-        padding = VIEW3D_OP_SprytileGui.get_region_padding(context)
-        avail_width = region.width - padding['left'] - padding['right']
-        avail_height = region.height - padding['top'] - padding['bottom']
+        avail_width, avail_height = VIEW3D_OP_SprytileGui.get_available_area(context)
         if avail_width <= 0 or avail_height <= 0:
             return zoom
 
@@ -459,40 +481,98 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if display_size[0] <= 0 or display_size[1] <= 0:
             return
 
-        # init_zoom_flag used to make this a once per file decision, so loading
-        # a bigger tileset kept the zoom picked for the previous one. Redo the
-        # calculation whenever the tileset size actually changed, and otherwise
-        # only enforce the size cap, leaving the zoom the user scrolled to.
-        size_changed = VIEW3D_OP_SprytileGui.zoom_display_size != tuple(display_size)
-        if sprytile_ui.init_zoom_flag and not size_changed:
-            sprytile_ui.zoom = VIEW3D_OP_SprytileGui.clamp_zoom(context, sprytile_ui.zoom)
+        # Refit on the first call of a session and whenever the tileset size
+        # changes, then leave the zoom alone so scrolling sticks. init_zoom_flag
+        # alone used to make this a once per file decision, so a new tileset
+        # inherited the zoom picked for the previous one.
+        #
+        # zoom_display_size is runtime only on purpose, which means the refit
+        # also happens on every file load. That is wanted: a zoom saved from a
+        # small window would otherwise keep the palette tiny forever, and files
+        # written before the clamp write-back was fixed carry exactly that.
+        if sprytile_ui.init_zoom_flag and \
+                VIEW3D_OP_SprytileGui.zoom_display_size == tuple(display_size):
             return
 
-        target_height = region.height * 0.35
+        # Fit against the smaller free dimension, not the region height. On a
+        # landscape monitor the height is the short side, so the old height only
+        # target made a square atlas come out tiny.
+        avail_width, avail_height = VIEW3D_OP_SprytileGui.get_available_area(context)
+        limit = min(max(avail_width, 1), max(avail_height, 1))
+        try:
+            addon_prefs = context.preferences.addons[__package__].preferences
+            fraction = max(10, min(90, addon_prefs.palette_size_percent)) / 100.0
+        except (KeyError, AttributeError):
+            fraction = 0.5
+        target = limit * fraction
 
-        zoom_level = round(region.height / display_size[1])
+        # Solve for the zoom directly instead of stepping down through
+        # calc_zoom. That ladder subtracts 0.25 below a zoom of 2, which is a
+        # huge step for a 2048 atlas whose useful range is roughly 0.05 to 0.4,
+        # so stepping overshot the target badly. The ladder stays in use for
+        # scroll wheel zooming, where its feel is the point.
+        longest = max(display_size[0], display_size[1])
+        zoom_level = target / longest
 
-        if zoom_level <= 0:
-            zoom_level = self.calc_zoom(context, 1, -1)
-
-        calc_height = round(display_size[1] * zoom_level)
-        while calc_height > target_height and zoom_level > 0.001:
-            zoom_level = self.calc_zoom(context, zoom_level, -1)
-            calc_height = round(display_size[1] * zoom_level)
-
-        sprytile_ui.zoom = VIEW3D_OP_SprytileGui.clamp_zoom(context, zoom_level)
+        sprytile_ui.zoom = zoom_level
         sprytile_ui.init_zoom_flag = True
         VIEW3D_OP_SprytileGui.zoom_display_size = tuple(display_size)
 
-    def calc_palette_pos(self, context):
-        # The viewport can be resized under a zoom that used to fit. Only
-        # reached from modal code, so writing the scene property is allowed.
-        sprytile_ui = context.scene.sprytile_ui
-        clamped_zoom = VIEW3D_OP_SprytileGui.clamp_zoom(context, sprytile_ui.zoom)
-        if clamped_zoom != sprytile_ui.zoom:
-            sprytile_ui.zoom = clamped_zoom
+    @staticmethod
+    def get_margin_prefs(context):
+        """The user's palette margin preferences, as (left, top)."""
+        try:
+            addon_prefs = context.preferences.addons[__package__].preferences
+            return (max(0, addon_prefs.palette_pad_left),
+                    max(0, addon_prefs.palette_pad_top))
+        except (KeyError, AttributeError):
+            return (0, 0)
 
-        display_scale = clamped_zoom
+    def apply_margin_change(self, context, sprytile_ui):
+        """Shift the palette by however much the margin preferences moved.
+
+        Clamping alone only ever pushes the palette inwards, so lowering a
+        margin again would leave it where it was. Tracking the applied values
+        and moving by the difference makes the setting work both ways.
+        """
+        margins = VIEW3D_OP_SprytileGui.get_margin_prefs(context)
+        applied = VIEW3D_OP_SprytileGui.applied_margin_prefs
+
+        if applied is None:
+            VIEW3D_OP_SprytileGui.applied_margin_prefs = margins
+            return
+        if applied == margins:
+            return
+
+        # Top margin grows downwards, the stored position counts up from the bottom
+        sprytile_ui.palette_pos[0] += margins[0] - applied[0]
+        sprytile_ui.palette_pos[1] -= margins[1] - applied[1]
+        VIEW3D_OP_SprytileGui.applied_margin_prefs = margins
+
+    def calc_palette_pos(self, context):
+        sprytile_ui = context.scene.sprytile_ui
+
+        # palette_pos is region relative, so a value saved on one monitor is
+        # meaningless on another. Dragging the window used to clamp it inwards
+        # and that clamped value was persisted, so the palette crept towards the
+        # middle of the viewport and never returned to its corner. Anchor once
+        # per session and let an explicit drag move it from there.
+        if not VIEW3D_OP_SprytileGui.anchored_this_session:
+            VIEW3D_OP_SprytileGui.anchored_this_session = True
+            sprytile_ui.palette_pos = (0, 0)
+            # Files saved before the texture node filter carry entries for
+            # materials that cannot be tilesets, clear them without waiting for
+            # the user to press Validate Tile Grids
+            sprytile_utils.prune_textureless_grids(context)
+
+        self.apply_margin_change(context, sprytile_ui)
+
+        # The size cap is presentation only and must NOT be written back.
+        # clamp_zoom only ever lowers the value, so persisting it made a
+        # temporarily small viewport permanent: dragging the Blender window to a
+        # smaller monitor shrank the palette and moving back never restored it.
+        # sprytile_ui.zoom stays the zoom the user picked, this is what fits.
+        display_scale = VIEW3D_OP_SprytileGui.clamp_zoom(context, sprytile_ui.zoom)
         display_size = VIEW3D_OP_SprytileGui.display_size
         display_size = round(display_size[0] * display_scale), round(display_size[1] * display_scale)
         
@@ -511,6 +591,11 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         display_offset.x = min(display_offset.x, display_max.x)
         display_offset.y = max(display_offset.y, display_min.y)
         display_offset.y = min(display_offset.y, display_max.y)
+
+        # Deliberately NOT written back. Clamping only ever moves the palette
+        # inwards, so persisting it made a temporarily smaller viewport permanent
+        # and the palette drifted towards the centre. Explicit drags and
+        # set_zoom_level are what store a position.
 
         return display_offset, display_size, size_half, display_min, display_max
 
@@ -541,9 +626,19 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             return ret_val
 
         if event.type == 'MIDDLEMOUSE':
-            context.scene.sprytile_ui.middle_btn = True
-        if context.scene.sprytile_ui.middle_btn and event.value == 'RELEASE':
-            context.scene.sprytile_ui.middle_btn = False
+            context.scene.sprytile_ui.middle_btn = event.value != 'RELEASE'
+        elif context.scene.sprytile_ui.middle_btn and not VIEW3D_OP_SprytileGui.is_moving:
+            # Orbiting or zooming hands the events to Blender's own navigation
+            # modal, which consumes the middle mouse release. The flag then
+            # stayed on forever and draw_to_viewport kept skipping the preview
+            # tile. Any plain mouse move means navigation is over.
+            if event.type in {'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'} or event.value == 'RELEASE':
+                context.scene.sprytile_ui.middle_btn = False
+
+        # Blender's own panels win over the palette, whatever is drawn beneath
+        if VIEW3D_OP_SprytileGui.mouse_over_ui_region(context, event):
+            context.scene.sprytile_ui.use_mouse = False
+            return 'PASS_THROUGH'
 
         if mouse_pt is not None and event.type in {'MOUSEMOVE'}:
             mouse_in_region = 0 <= mouse_pt.x <= region.width and 0 <= mouse_pt.y <= region.height
@@ -1303,6 +1398,7 @@ def unregister():
     VIEW3D_OP_SprytileGui.free_offscreen()
     VIEW3D_OP_SprytileGui.is_running = False
     VIEW3D_OP_SprytileGui.tile_ui_active = False
+    VIEW3D_OP_SprytileGui.anchored_this_session = False
 
     for c in classes:
         bpy.utils.unregister_class(c)

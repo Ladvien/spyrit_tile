@@ -611,6 +611,13 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         if VIEW3D_OP_SprytileModalTool.no_undo and sprytile_data.is_grid_translate is False:
             VIEW3D_OP_SprytileModalTool.no_undo = False
 
+        # Cursor over Blender's own toolbar, sidebar or headers. The window
+        # region runs underneath them with region overlap on, so without this
+        # the paint modal would swallow clicks meant for their buttons.
+        if sprytile_utils.mouse_over_ui_region(context, event):
+            sprytile_preview.clear_preview_data()
+            return {'PASS_THROUGH'}
+
         # Mouse in Sprytile UI, eat this event without doing anything
         if context.scene.sprytile_ui.use_mouse:
             sprytile_preview.clear_preview_data()
