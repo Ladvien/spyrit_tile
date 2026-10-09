@@ -107,3 +107,16 @@ def test_gui_load_tileset_twice_on_two_objects_makes_one_material():
     assert bpy.ops.sprytile.tileset_new(filepath=str(FIXTURE_IMAGE)) == {'FINISHED'}
     assert len(second.material_slots) == 1
     assert [m.name for m in bpy.data.materials if m.name.startswith(stem)] == [stem]
+
+
+def test_gui_reuse_syncs_the_grid_list_highlight(tmp_path):
+    other_image = tmp_path / "idem_other.png"
+    other_image.write_bytes(FIXTURE_IMAGE.read_bytes())
+    obj = _make_active_object(PREFIX + "one")
+    scene = bpy.context.scene
+    assert bpy.ops.sprytile.tileset_load(filepath=str(FIXTURE_IMAGE)) == {'FINISHED'}
+    assert bpy.ops.sprytile.tileset_new(filepath=str(other_image)) == {'FINISHED'}
+    assert bpy.ops.sprytile.tileset_load(filepath=str(FIXTURE_IMAGE)) == {'FINISHED'}
+    display = scene.sprytile_list.display
+    assert display[scene.sprytile_list.idx].grid_id == obj.sprytile_gridid
+    bpy.data.materials.remove(bpy.data.materials["idem_other"])
