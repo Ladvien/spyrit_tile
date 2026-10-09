@@ -1,11 +1,18 @@
 <p align="center">
     <img src="sprytile-logo.png?raw=true" height="100px"/>
-    <h1 align="center">Sprytile Painter</h1>
+    <h1 align="center">Spyrite Tile</h1>
     <h4 align="center">
-        A <img src="https://download.blender.org/institute/logos/blender-socket.png" height="20px"/> addon for creating tile based low spec 3D scenes. (Unofficial port for Blender 4.5+ / 5.x)
+        Agent-driven 3D pixel-art tile building for <img src="https://download.blender.org/institute/logos/blender-socket.png" height="20px"/> Blender 5.2. A fork of <a href="https://github.com/Sprytile/Sprytile">Sprytile</a>.
     </h4>
   <br>
 </p>
+
+Spyrite Tile is a Blender add-on for creating tile based low spec 3D scenes, forked from Sprytile by Jeiel Aranal and ported to Blender 4.5+ / 5.x.
+
+> **Compatibility note.** Spyrite Tile keeps all of Sprytile's internal identifiers (`sprytile.*` operators, `scene.sprytile_data`, `scene.sprytile_mats`, `object.sprytile_gridid`, keymap and mesh layer names) so that existing data keeps working. Only user-visible names are rebranded. As a consequence:
+>
+> * Spyrite Tile **cannot be enabled alongside the original Sprytile add-on**. Disable or remove Sprytile first.
+> * Tile data in existing Sprytile 0.5.x `.blend` files keeps working.
 
 ### Features
 
@@ -19,8 +26,7 @@
 
 ### Requirements:
 
-Blender 4.5 LTS or newer, including the 5.x series. For Blender 2.8 - 4.4 use an
-earlier release of this port.
+Blender 4.5 LTS or newer, including the 5.x series.
 
 ### Install:
 
@@ -28,28 +34,40 @@ earlier release of this port.
   and pick the zip. Build one with
   `blender --command extension build --source-dir . --output-dir dist`.
 * **As a legacy addon:** drop this folder into your Blender `scripts/addons`
-  directory and enable "Sprytile Painter" in Preferences.
-
-### Download:
-
-Download from [releases](https://github.com/ologon/Sprytile/releases).
+  directory and enable the add-on in Preferences.
 
 ### Getting Started:
 
-* [Sprytile Basics Tutorial](http://docs.sprytile.xyz/quick-start/) ([video](https://youtu.be/-ezYZgMp-R0))
-
-### Community:
-
-* Chat with the fellow users in the [Discord server](http://discord.sprytile.xyz/)
-* Showcase your work or ask for support in the [forum](https://chemikhazi.itch.io/sprytile/community)
+* [Sprytile Basics Tutorial](http://docs.sprytile.xyz/quick-start/) ([video](https://youtu.be/-ezYZgMp-R0)) (upstream documentation; the workflow is the same)
 
 ### Issue/Feature requests:
 
-Bug reports for this port can be submitted to [GitHub issues](https://github.com/ologon/Sprytile/issues)
+Bug reports and feature requests: [GitHub issues](https://github.com/ladvien/spyrite_tile/issues)
 
-### Acknowledgments:
+## Origin and credit
 
-The bulk of Blender 2.8 porting work by was done by [Yonnji](https://github.com/Yonnji) and [ologon](https://github.com/ologon), with additional contributions by [brandy92](https://github.com/brandy92)
+Spyrite Tile is a fork of [Sprytile](https://github.com/Sprytile/Sprytile) by Jeiel Aranal, released under the MIT license. Sprytile's original copyright notice is preserved in `license.txt`.
+
+* This repository was cloned from upstream commit `6b68d00` (v0.5.20, "Merge branch 'dev_28' for version 0.5.2 release").
+* The Blender 4.5+/5.x port is upstream PR #154 by denischernitsyn, merged here as #154.
+* Issues and PRs #1-#154 were imported from Sprytile/Sprytile, and each one links to its original.
+* Upstream contributors, from `git shortlog -sn 6b68d00` (commits):
+
+  | Commits | Contributor |
+  |---:|---|
+  | 611 | Jeiel Aranal |
+  | 76 | Spadafina Alfredo |
+  | 11 | Yonnji |
+  | 7 | Alfredo Spadafina |
+  | 2 | Spadafina |
+  | 2 | ologon |
+  | 1 | Andrea Faulds |
+  | 1 | Cezary Kopias |
+  | 1 | cg-cnu |
+  | 1 | dani |
+  | 1 | lindor |
+
+  (Some of these are the same person under different git identities.) The Blender 2.8 port was done by [Yonnji](https://github.com/Yonnji) and [ologon](https://github.com/ologon), with additional contributions by [brandy92](https://github.com/brandy92).
 
 ### Blender 4.5+ / 5.x port notes:
 
@@ -63,11 +81,5 @@ The bulk of Blender 2.8 porting work by was done by [Yonnji](https://github.com/
   `sys.path` and installs cleanly as a Blender extension.
 * The bundled RxPY 1.6 copy (245 files, ~12.7k lines) was replaced by
   `sprytile_event.py`, a small synchronous event source with the same
-  semantics. Only five of its methods were ever used. This was housekeeping,
-  not a porting requirement: RxPY 1.6 still imports fine on the Python versions
-  Blender ships, and the addon loads with it either way. It does need the addon
-  folder on `sys.path`, since it resolves its own modules with absolute
-  `from rx...` imports, which puts a second `rx` into the global module
-  namespace alongside any other addon that bundles one.
-* The unused `addon_updater` was dropped, it was already disabled and would
-  have tried to install the Blender 2.8 build over this one.
+  semantics. Only five of its methods were ever used.
+* The unused `addon_updater` was dropped.
