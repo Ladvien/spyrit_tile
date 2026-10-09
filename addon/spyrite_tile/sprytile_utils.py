@@ -450,12 +450,29 @@ def get_grid(context, grid_id):
 
 
 def get_highest_grid_id(context):
+    return get_scene_highest_grid_id(context.scene)
+
+
+def get_scene_highest_grid_id(scene):
     highest_id = -1
-    mat_list = context.scene.sprytile_mats
-    for mat_data in mat_list:
+    for mat_data in scene.sprytile_mats:
         for grid in mat_data.grids:
             highest_id = max(grid.id, highest_id)
     return highest_id
+
+
+def ensure_scene_setup(scene):
+    """Make sure Spyrite Tile's scene and object properties exist, return scene.sprytile_data.
+
+    The properties are registered with the add-on and are removed again by the
+    "Remove Sprytile data" operator. Registering them is what the
+    sprytile.props_setup operator does, so this is a no-op unless they were
+    torn down.
+    """
+    if not hasattr(bpy.types.Scene, "sprytile_data") or not hasattr(bpy.types.Object, "sprytile_gridid"):
+        from . import PROP_OP_SprytilePropsSetup
+        PROP_OP_SprytilePropsSetup.props_setup()
+    return scene.sprytile_data
 
 
 def get_mat_data(context, mat_id):
@@ -895,6 +912,57 @@ class UTIL_OP_SprytileNewMaterial(bpy.types.Operator):
         return {'FINISHED'}
 
 
+def setup_tile_material(material, image=None, closest=True):
+    """Turn a material into the shadeless, alpha-cut one Sprytile tiles use.
+
+    Rebuilds the node tree around a single image texture node. With image
+    None the material's existing texture is kept. closest sets the node's
+    interpolation to Closest, which pixel art needs for crisp texels.
+    """
+    # Make material equivalent to a shadeless transparent one in Blender 2.7
+    material.surface_render_method = 'DITHERED'
+
+    # Keep the material's current texture unless a new one was given
+    if image is None:
+        image = get_material_texture(material)
+
+    # Setup nodes
+    nodes = material.node_tree.nodes
+    nodes.clear()
+    output_n = nodes.new(type = 'ShaderNodeOutputMaterial')
+    light_path_n = nodes.new(type = 'ShaderNodeLightPath')
+    transparent_n = nodes.new(type = 'ShaderNodeBsdfTransparent')
+    emission_n = nodes.new(type = 'ShaderNodeEmission')
+    mix_cam_ray_n = nodes.new(type = 'ShaderNodeMixShader')
+    mix_alpha_n = nodes.new(type = 'ShaderNodeMixShader')
+    texture_n = nodes.new(type = 'ShaderNodeTexImage')
+
+    # link
+    links = material.node_tree.links
+    links.new(texture_n.outputs['Color'], emission_n.inputs['Color'])
+    links.new(texture_n.outputs['Alpha'], mix_alpha_n.inputs['Fac'])
+    links.new(transparent_n.outputs['BSDF'], mix_alpha_n.inputs[1])
+    links.new(transparent_n.outputs['BSDF'], mix_cam_ray_n.inputs[1])
+    links.new(emission_n.outputs['Emission'], mix_alpha_n.inputs[2])
+    links.new(mix_alpha_n.outputs['Shader'], mix_cam_ray_n.inputs[2])
+    links.new(light_path_n.outputs['Is Camera Ray'], mix_cam_ray_n.inputs['Fac'])
+    links.new(mix_cam_ray_n.outputs['Shader'], output_n.inputs['Surface'])
+
+    # reorder
+    output_n.location = (400, 0)
+    mix_cam_ray_n.location = (200, 0)
+    light_path_n.location = (0, 250)
+    mix_alpha_n.location = (0, -100)
+    transparent_n.location = (-200, -100)
+    emission_n.location = (-200, -200)
+    texture_n.location = (-500, 100)
+
+    if image:
+        texture_n.image = image
+    if closest:
+        texture_n.interpolation = 'Closest'
+
+
 class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
     bl_idname = "sprytile.material_setup"
     bl_label = "Set Material to Shadeless"
@@ -912,48 +980,9 @@ class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
         if obj.type != 'MESH' or len(obj.material_slots) == 0:
             return {'FINISHED'}
 
-        mat = obj.material_slots[obj.active_material_index].material
-
-        # Make material equivalent to a shadeless transparent one in Blender 2.7 
-        mat.surface_render_method = 'DITHERED'
-
-        # Get the material texture (if any) so we can keep it
-        mat_texture = get_material_texture(mat)
-
-        # Setup nodes
-        nodes = mat.node_tree.nodes
-        nodes.clear()
-        output_n = nodes.new(type = 'ShaderNodeOutputMaterial')
-        light_path_n = nodes.new(type = 'ShaderNodeLightPath')
-        transparent_n = nodes.new(type = 'ShaderNodeBsdfTransparent')
-        emission_n = nodes.new(type = 'ShaderNodeEmission')
-        mix_cam_ray_n = nodes.new(type = 'ShaderNodeMixShader')
-        mix_alpha_n = nodes.new(type = 'ShaderNodeMixShader')
-        texture_n = nodes.new(type = 'ShaderNodeTexImage')
-
-        # link
-        links = mat.node_tree.links
-        links.new(texture_n.outputs['Color'], emission_n.inputs['Color'])
-        links.new(texture_n.outputs['Alpha'], mix_alpha_n.inputs['Fac'])
-        links.new(transparent_n.outputs['BSDF'], mix_alpha_n.inputs[1])
-        links.new(transparent_n.outputs['BSDF'], mix_cam_ray_n.inputs[1])
-        links.new(emission_n.outputs['Emission'], mix_alpha_n.inputs[2])
-        links.new(mix_alpha_n.outputs['Shader'], mix_cam_ray_n.inputs[2])
-        links.new(light_path_n.outputs['Is Camera Ray'], mix_cam_ray_n.inputs['Fac'])
-        links.new(mix_cam_ray_n.outputs['Shader'], output_n.inputs['Surface'])
-
-        # reorder
-        output_n.location = (400, 0)
-        mix_cam_ray_n.location = (200, 0)
-        light_path_n.location = (0, 250)
-        mix_alpha_n.location = (0, -100)
-        transparent_n.location = (-200, -100)
-        emission_n.location = (-200, -200)
-        texture_n.location = (-500, 100)
-
-        if mat_texture:
-            texture_n.image = mat_texture
-
+        # The interactive operator leaves interpolation alone: the separate
+        # texture setup operator is what switches a tileset to Closest
+        setup_tile_material(obj.material_slots[obj.active_material_index].material, closest=False)
         return {'FINISHED'}
 
 
@@ -1115,6 +1144,124 @@ class UTIL_OP_SprytileSetupTexture(bpy.types.Operator):
         # target_slot.texture_coords = 'UV'
 
 
+def validate_grids(scene, active_object=None):
+    """Reconcile scene.sprytile_mats with the materials in the file.
+
+    Re-points renamed materials, drops entries without a usable image
+    texture node or without users, and adds a grid entry for every material
+    that carries an image texture. When active_object is given its
+    sprytile_gridid is moved to the newest grid. Then rebuilds the grid list.
+    """
+    mat_list = bpy.data.materials
+    mat_data_list = scene.sprytile_mats
+
+    # Validate the material IDs in scene.sprytile_mats
+    for check_mat_data in mat_data_list:
+        mat_idx = mat_list.find(check_mat_data.mat_id)
+        if mat_idx > -1:
+            continue
+
+        # This mat data id not found in materials
+        # Loop through materials looking for one
+        # that doesn't appear in sprytile_mats list
+        for check_mat in mat_list:
+            mat_unused = True
+            for mat_data in mat_data_list:
+                if mat_data.mat_id == check_mat.name:
+                    mat_unused = False
+                    break
+
+            if mat_unused:
+                target_mat_id = check_mat_data.mat_id
+                check_mat_data.mat_id = check_mat.name
+                for grid in check_mat_data.grids:
+                    grid.mat_id = check_mat.name
+                for list_display in scene.sprytile_list.display:
+                    if list_display.mat_id == target_mat_id:
+                        list_display.mat_id = check_mat.name
+                break
+
+    remove_idx = []
+
+    # Filter out mat data with invalid IDs or users
+    for idx, mat in enumerate(mat_data_list.values()):
+        mat_idx = mat_list.find(mat.mat_id)
+        if mat_idx < 0:
+            remove_idx.append(idx)
+            continue
+        if (mat.mat_id == "Dots Stroke"):
+            remove_idx.append(idx)
+            continue
+        # A material with no image texture node cannot act as a tileset, so
+        # an entry for it is dead weight the user cannot get rid of: it was
+        # recreated by the loop below on every validate.
+        if get_material_texture_node(mat_list[mat_idx]) is None:
+            remove_idx.append(idx)
+            continue
+        if mat_list[mat_idx].users == 0:
+            remove_idx.append(idx)
+        for grid in mat.grids:
+            grid.mat_id = mat.mat_id
+    remove_idx.reverse()
+    for idx in remove_idx:
+        mat_data_list.remove(idx)
+
+    # Loop through available materials, checking if mat_data_list has
+    # at least one entry for each material
+    for mat in mat_list:
+        if mat.users == 0:
+            continue
+        is_mat_valid = False
+        for mat_data in mat_data_list:
+            if mat_data.mat_id == mat.name:
+                is_mat_valid = True
+                break
+        # Only materials that carry an image texture node can be tilesets.
+        # Without this every material in the file, including Blender's
+        # default "Material", showed up in the Sprytile list permanently.
+        if get_material_texture_node(mat) is None:
+            continue
+        if is_mat_valid is False and mat.name != "Dots Stroke":
+            mat_data_entry = mat_data_list.add()
+            mat_data_entry.mat_id = mat.name
+            mat_grid = mat_data_entry.grids.add()
+            mat_grid.mat_id = mat.name
+            mat_grid.id = get_scene_highest_grid_id(scene) + 1
+
+            addon_prefs = bpy.context.preferences.addons[__package__].preferences
+            if addon_prefs:
+                mat_grid.grid = addon_prefs.default_grid
+                mat_grid.auto_pad_offset = addon_prefs.default_pad_offset
+
+    if active_object is not None:
+        active_object.sprytile_gridid = get_scene_highest_grid_id(scene)
+    build_grid_list(scene, active_object)
+
+
+def build_grid_list(scene, active_object=None):
+    """Build the scene.sprytile_list.display from scene.sprytile_mats
+
+    active_object picks the highlighted list entry; None leaves it alone.
+    """
+    display_list = scene.sprytile_list.display
+    mat_list = scene.sprytile_mats
+
+    display_list.clear()
+    for mat_data in mat_list:
+        mat_display = display_list.add()
+        mat_display.mat_id = mat_data.mat_id
+        if mat_data.is_expanded is False:
+            continue
+        for mat_grid in mat_data.grids:
+            idx = len(display_list)
+            grid_display = display_list.add()
+            grid_display.grid_id = mat_grid.id
+            grid_display.parent_mat_name = mat_display.mat_name
+            grid_display.parent_mat_id = mat_display.mat_id
+            if active_object is not None and active_object.sprytile_gridid == grid_display.grid_id:
+                scene.sprytile_list.idx = idx
+
+
 class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
     bl_idname = "sprytile.validate_grids"
     bl_label = "Validate Tile Grids"
@@ -1128,94 +1275,8 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
         return self.invoke(context, None)
 
     def invoke(self, context, event):
-        self.validate_grids(context)
+        validate_grids(context.scene, context.object)
         return {'FINISHED'}
-
-    @staticmethod
-    def validate_grids(context):
-        mat_list = bpy.data.materials
-        mat_data_list = context.scene.sprytile_mats
-
-        # Validate the material IDs in scene.sprytile_mats
-        for check_mat_data in mat_data_list:
-            mat_idx = mat_list.find(check_mat_data.mat_id)
-            if mat_idx > -1:
-                continue
-
-            # This mat data id not found in materials
-            # Loop through materials looking for one
-            # that doesn't appear in sprytile_mats list
-            for check_mat in mat_list:
-                mat_unused = True
-                for mat_data in mat_data_list:
-                    if mat_data.mat_id == check_mat.name:
-                        mat_unused = False
-                        break
-
-                if mat_unused:
-                    target_mat_id = check_mat_data.mat_id
-                    check_mat_data.mat_id = check_mat.name
-                    for grid in check_mat_data.grids:
-                        grid.mat_id = check_mat.name
-                    for list_display in context.scene.sprytile_list.display:
-                        if list_display.mat_id == target_mat_id:
-                            list_display.mat_id = check_mat.name
-                    break
-
-        remove_idx = []
-
-        # Filter out mat data with invalid IDs or users
-        for idx, mat in enumerate(mat_data_list.values()):
-            mat_idx = mat_list.find(mat.mat_id)
-            if mat_idx < 0:
-                remove_idx.append(idx)
-                continue
-            if (mat.mat_id == "Dots Stroke"):
-                remove_idx.append(idx)
-                continue
-            # A material with no image texture node cannot act as a tileset, so
-            # an entry for it is dead weight the user cannot get rid of: it was
-            # recreated by the loop below on every validate.
-            if get_material_texture_node(mat_list[mat_idx]) is None:
-                remove_idx.append(idx)
-                continue
-            if mat_list[mat_idx].users == 0:
-                remove_idx.append(idx)
-            for grid in mat.grids:
-                grid.mat_id = mat.mat_id
-        remove_idx.reverse()
-        for idx in remove_idx:
-            mat_data_list.remove(idx)
-
-        # Loop through available materials, checking if mat_data_list has
-        # at least one entry for each material
-        for mat in mat_list:
-            if mat.users == 0:
-                continue
-            is_mat_valid = False
-            for mat_data in mat_data_list:
-                if mat_data.mat_id == mat.name:
-                    is_mat_valid = True
-                    break
-            # Only materials that carry an image texture node can be tilesets.
-            # Without this every material in the file, including Blender's
-            # default "Material", showed up in the Sprytile list permanently.
-            if get_material_texture_node(mat) is None:
-                continue
-            if is_mat_valid is False and mat.name != "Dots Stroke":
-                mat_data_entry = mat_data_list.add()
-                mat_data_entry.mat_id = mat.name
-                mat_grid = mat_data_entry.grids.add()
-                mat_grid.mat_id = mat.name
-                mat_grid.id = get_highest_grid_id(context) + 1
-
-                addon_prefs = bpy.context.preferences.addons[__package__].preferences
-                if addon_prefs:
-                    mat_grid.grid = addon_prefs.default_grid
-                    mat_grid.auto_pad_offset = addon_prefs.default_pad_offset
-
-        context.object.sprytile_gridid = get_highest_grid_id(context)
-        bpy.ops.sprytile.build_grid_list()
 
 
 class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
@@ -1226,29 +1287,8 @@ class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
         return self.invoke(context, None)
 
     def invoke(self, context, event):
-        self.build_list(context)
+        build_grid_list(context.scene, context.object)
         return {'FINISHED'}
-
-    @staticmethod
-    def build_list(context):
-        """Build the scene.sprytile_list.display from scene.sprytile_mats"""
-        display_list = context.scene.sprytile_list.display
-        mat_list = context.scene.sprytile_mats
-
-        display_list.clear()
-        for mat_data in mat_list:
-            mat_display = display_list.add()
-            mat_display.mat_id = mat_data.mat_id
-            if mat_data.is_expanded is False:
-                continue
-            for mat_grid in mat_data.grids:
-                idx = len(display_list)
-                grid_display = display_list.add()
-                grid_display.grid_id = mat_grid.id
-                grid_display.parent_mat_name = mat_display.mat_name
-                grid_display.parent_mat_id = mat_display.mat_id
-                if context.object.sprytile_gridid == grid_display.grid_id:
-                    context.scene.sprytile_list.idx = idx
 
 
 class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
