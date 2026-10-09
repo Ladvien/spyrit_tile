@@ -8,6 +8,7 @@ The disabled test comes last and re-enables the add-on in `finally`.
 from pathlib import Path
 
 import addon_utils
+import bmesh
 import bpy
 import pytest
 
@@ -514,6 +515,49 @@ def test_build_spec_and_export_spec_match_api(tmp_path):
         _remove_test_data()
 
 
+def test_verify_tile_object_matches_api(tileset, tmp_path):
+    _create_object_pair()
+    ops.fill_tiles(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (3, 3), (2, 1))
+    ops.place_tiles(OPS_OBJECT_NAME, TILESET_NAME, [ops.TilePlacement(cell_xy=(1, 1), tile_xy=(0, 3))])
+    objects_before = sorted(o.name for o in bpy.data.objects)
+    report = ops.verify_tile_object(OPS_OBJECT_NAME, view="top", evidence_dir=tmp_path / "ops")
+    api_result = _api().verify_tile_object(OPS_OBJECT_NAME, view="top", evidence_dir=str(tmp_path / "api"))
+
+    assert isinstance(report, ops.VerifyReport)
+    assert report.ok is api_result["ok"] is True
+    assert report.measured == api_result["measured"] == 16
+    assert report.mismatches == () and api_result["mismatches"] == []
+    assert report.max_channel_delta == pytest.approx(api_result["max_channel_delta"])
+    assert report.evidence_dir == str(tmp_path / "ops")
+    assert report.render_path == str(tmp_path / "ops" / "render.png")
+    assert Path(report.render_path).is_file()
+    assert sorted(o.name for o in bpy.data.objects) == objects_before
+
+    # UVs that show another tile than the face data says come back as FaceMismatch
+    obj = bpy.data.objects[OPS_OBJECT_NAME]
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.faces.ensure_lookup_table()
+    saved = {layer.name: mesh.faces[0][layer] for layer in mesh.faces.layers.int}
+    mesh.free()
+    _api().paint_faces(OPS_OBJECT_NAME, TILESET_NAME, [0], (3, 3))
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.faces.ensure_lookup_table()
+    for layer in mesh.faces.layers.int:
+        mesh.faces[0][layer] = saved[layer.name]
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    bad = ops.verify_tile_object(OPS_OBJECT_NAME, view="top", evidence_dir=tmp_path / "bad")
+    assert bad.ok is False and bad.measured == 16
+    assert len(bad.mismatches) == 1
+    mismatch = bad.mismatches[0]
+    assert isinstance(mismatch, ops.FaceMismatch)
+    assert (mismatch.index, mismatch.plane) == (0, "XY")
+    assert mismatch.tile_xy == (2, 1) and len(mismatch.cell_xy) == 2
+    assert mismatch.max_channel_delta > 12.0
+
+
 def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     from blended.ops._contract import is_reads_only
 
@@ -522,6 +566,7 @@ def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
         "scene_report",
         "select_tile_faces",
         "export_spec",
+        "verify_tile_object",
     ]
 
 

@@ -66,6 +66,12 @@ Reading back
     its report. A decal reports its lifted ``plane_offset_m``. :func:`describe_scene` lists the tilesets, the
     tile objects and the scene settings.
 
+Verifying
+    :func:`verify_tile_object` renders an object with Workbench from the plane's side and compares the four
+    quadrants of every visible face with the quadrants of its tile in the tileset image (turned and mirrored
+    per the face's orientation), so UVs that disagree with the face's tile data are caught from pixels. It
+    leaves the scene unchanged and writes ``render.png`` into an evidence directory.
+
 Specs
     :func:`build_spec` builds a whole scene from a YAML file (tilesets, objects, fills, tiles; tiles may be
     given by name from the tileset's sidecar) and :func:`export_spec` writes tile objects back to one; see
@@ -111,15 +117,19 @@ Composite builders
     their UVs from the tile data stored on them.
 """
 
+import array
 import math
 import numbers
 import os
+import tempfile
 from contextlib import ExitStack, contextmanager
 
 import bmesh
 import bpy
-from mathutils import Vector
+from bpy_extras.object_utils import world_to_camera_view
+from mathutils import Matrix, Vector
 
+from . import spyrite_probe
 from . import spyrite_spec
 from . import sprytile_utils
 from . import sprytile_uv
@@ -139,6 +149,7 @@ __all__ = [
     "describe_tile_object",
     "describe_scene",
     "set_pixel_art_view",
+    "verify_tile_object",
 ]
 
 PLANES = {
@@ -2186,6 +2197,295 @@ def export_spec(object_names, spec_path):
     }
 
 
+def _render_still():
+    bpy.ops.render.render(write_still=True)
+
+
+def _apply_pixel_art_scene_settings(scene):
+    scene.display.shading.color_type = "TEXTURE"
+    scene.display.shading.light = "FLAT"
+    scene.display.render_aa = "OFF"
+    scene.view_settings.view_transform = "Standard"
+
+
+# view -> plane the camera looks at (down the plane's -normal)
+_VERIFY_VIEW_PLANE = {"top": "XY", "front": "XZ", "right": "YZ"}
+_VERIFY_PLANE_VIEW = {plane: view for view, plane in _VERIFY_VIEW_PLANE.items()}
+VERIFY_CELL_PX = 32  # on-screen pixels per tile cell the verify render aims for
+VERIFY_MIN_CELL_PX = 8  # below this a cell has no inner quadrants worth measuring
+VERIFY_MAX_RESOLUTION = 2048
+VERIFY_FRAME_MARGIN = 1.05
+
+
+def _image_picture(image):
+    """(width, height, rgba floats, top row first) of a Blender image; Blender stores rows bottom first."""
+    width, height = image.size
+    if width == 0 or height == 0:
+        raise ValueError(f"Image {image.name!r} has no pixels; reload it or check its file path")
+    flat = array.array("f", bytes(width * height * 16))
+    image.pixels.foreach_get(flat)
+    stride = width * 4
+    rows = array.array("f")
+    for y in range(height - 1, -1, -1):
+        rows.extend(flat[y * stride:(y + 1) * stride])
+    return (width, height, rows)
+
+
+def _tile_pixel_box(tileset, tile_xy, tile_span):
+    """Pixel box (x0, y0, x1, y1; y down) of a tile or span in the tileset image, the way the UVs address it."""
+    grid = tileset.grid
+    pitch_x, pitch_y = tileset.pitch
+    _, height = tileset.image_size
+    column, bottom_row = tileset.sprytile_origin(tile_xy, tile_span)
+    width_px = (tile_span[0] - 1) * pitch_x + grid.grid[0]
+    height_px = (tile_span[1] - 1) * pitch_y + grid.grid[1]
+    x0 = column * pitch_x + grid.padding[0]
+    y_bottom = bottom_row * pitch_y + grid.padding[1]
+    y0 = height - y_bottom - height_px
+    return (x0, y0, x0 + width_px, y0 + height_px)
+
+
+def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=None):
+    """Render a tile object with Workbench and check every visible face shows the tile its data claims.
+
+    The pixel oracle of ``scripts/visual_probe.py`` run from inside Blender: for each face looking at the
+    camera, the colours of its four quadrants in the render must match the four quadrants of its tile in the
+    tileset image, turned and mirrored per the face's ``rotation_deg``/``flip_x``/``flip_y``. The expected
+    side comes from the face's tile data (``describe_tile_object``) and the tileset image's pixels, never
+    from its UVs, so a face whose UVs show another tile than its data says is reported.
+
+    ``view`` is ``'top'`` (plane XY, camera above), ``'front'`` (XZ, camera on the -Y side), ``'right'`` (YZ,
+    camera on the +X side) or ``'auto'``: the plane holding most faces. ``tolerance`` is the largest accepted
+    channel difference, on a 0-255 scale. Faces are judged when they look at the camera, are whole-cell
+    rectangles with tile data (``on_grid``) and are not hidden under a nearer face (a decal hides its base).
+    The scene is rendered with ``BLENDER_WORKBENCH`` using the ``set_pixel_art_view`` values, an orthographic
+    camera framing the object (1.05 x the larger view extent) and every other object hidden from the render,
+    at a resolution of at least 32 px per cell (at most 2048 px; a cell must still get 8 px, else a
+    ``ValueError`` asks you to verify a smaller object).
+
+    Everything touched (render and shading settings, camera, hidden objects, mode) is put back and the
+    temporary camera and image datablocks are removed, so the scene is unchanged; the render is written to
+    ``evidence_dir/render.png`` (a new temporary directory when ``evidence_dir`` is None; must be absolute).
+
+    Returns ``{ok, measured, mismatches, max_channel_delta, evidence_dir, render_path}`` where ``measured``
+    counts the judged faces, ``mismatches`` lists ``{index, plane, cell_xy, tile_xy, max_channel_delta}`` of
+    the faces over tolerance, and ``ok`` is true only when at least one face was judged and none mismatched.
+    Raises ``RuntimeError`` when Blender cannot render with Workbench (for example without a GPU); run
+    ``make test-visual`` from the host then.
+    """
+    obj = _mesh_object(object_name)
+    if view != "auto" and view not in _VERIFY_VIEW_PLANE:
+        raise ValueError(f"view must be one of ['auto', 'front', 'right', 'top'], got {view!r}")
+    tolerance = _as_float("tolerance", tolerance)
+    if tolerance < 0:
+        raise ValueError(f"tolerance must be >= 0, got {tolerance}")
+    if evidence_dir is not None:
+        _as_name("evidence_dir", evidence_dir)
+        if not os.path.isabs(evidence_dir):
+            raise ValueError(f"evidence_dir must be an absolute path, got {evidence_dir!r}")
+    grid = sprytile_utils.get_grid(bpy.context, obj.sprytile_gridid)
+    if grid is None:
+        raise ValueError(f"Object {obj.name!r} has no tileset grid (sprytile_gridid {obj.sprytile_gridid}); "
+                         f"call create_tile_object first")
+
+    scene = bpy.context.scene
+    view_layer = bpy.context.view_layer
+    previous_active = view_layer.objects.active
+    previous_mode = obj.mode
+    if previous_mode != "OBJECT":
+        _switch_mode(obj, "OBJECT")
+    try:
+        report = describe_tile_object(object_name, max_faces=len(obj.data.polygons))
+        if not report["faces"]:
+            raise ValueError(f"Object {obj.name!r} has no faces to verify; place tiles first")
+        faces = report["faces"]
+        if view == "auto":
+            counts = {plane: sum(1 for f in faces if f["plane"] == plane) for plane in PLANES}
+            view = _VERIFY_PLANE_VIEW[max(PLANES, key=lambda plane: counts[plane])]
+        plane = PLANES[_VERIFY_VIEW_PLANE[view]]
+        toward_camera = Vector(plane["normal"])
+        right, up = Vector(plane["right"]), Vector(plane["up"])
+
+        ppu = _object_pixels_per_unit(obj, scene)
+        cell_m = min(grid.grid[0], grid.grid[1]) / ppu
+        world = obj.matrix_world
+        corners = [world @ Vector(c) for c in obj.bound_box]
+        centre = sum(corners, Vector()) / len(corners)
+        extent_right = max(c.dot(right) for c in corners) - min(c.dot(right) for c in corners)
+        extent_up = max(c.dot(up) for c in corners) - min(c.dot(up) for c in corners)
+        depth = [c.dot(toward_camera) for c in corners]
+        ortho_scale = max(extent_right, extent_up, cell_m) * VERIFY_FRAME_MARGIN
+        resolution = max(64, math.ceil(VERIFY_CELL_PX * ortho_scale / cell_m))
+        resolution = min(resolution, VERIFY_MAX_RESOLUTION)
+        if resolution * cell_m / ortho_scale < VERIFY_MIN_CELL_PX:
+            raise ValueError(
+                f"Object {obj.name!r} spans {ortho_scale / cell_m:.0f} cells across the {view} view; "
+                f"at {VERIFY_MAX_RESOLUTION} px a cell gets under {VERIFY_MIN_CELL_PX} px. "
+                f"Verify a smaller object"
+            )
+
+        if evidence_dir is None:
+            evidence_dir = tempfile.mkdtemp(prefix="spyrite_verify_")
+        else:
+            os.makedirs(evidence_dir, exist_ok=True)
+        render_path = os.path.join(evidence_dir, "render.png")
+
+        shading, render, view_settings = scene.display.shading, scene.render, scene.view_settings
+        saved = {
+            "scene": {name: getattr(scene, name) for name in ("camera",)},
+            "shading": {name: getattr(shading, name) for name in (
+                "color_type", "light", "show_object_outline", "show_cavity", "show_shadows", "show_xray")},
+            "display": {"render_aa": scene.display.render_aa},
+            "render": {name: getattr(render, name) for name in (
+                "engine", "resolution_x", "resolution_y", "resolution_percentage", "pixel_aspect_x",
+                "pixel_aspect_y", "filepath", "use_file_extension", "film_transparent", "use_compositing",
+                "use_sequencer")},
+            "image_settings": {name: getattr(render.image_settings, name) for name in (
+                "file_format", "color_mode", "color_depth")},
+            "view_settings": {name: getattr(view_settings, name) for name in (
+                "view_transform", "look", "exposure", "gamma")},
+        }
+        targets = {
+            "scene": scene, "shading": shading, "display": scene.display, "render": render,
+            "image_settings": render.image_settings, "view_settings": view_settings,
+        }
+        hidden_before = {other: other.hide_render for other in scene.objects}
+        camera_data = camera_object = image = None
+        try:
+            for other in scene.objects:
+                other.hide_render = other is not obj
+            render.engine = "BLENDER_WORKBENCH"
+            _apply_pixel_art_scene_settings(scene)
+            shading.show_object_outline = False
+            shading.show_cavity = False
+            shading.show_shadows = False
+            shading.show_xray = False
+            view_settings.look = "None"
+            view_settings.exposure = 0.0
+            view_settings.gamma = 1.0
+            render.resolution_x = render.resolution_y = resolution
+            render.resolution_percentage = 100
+            render.pixel_aspect_x = render.pixel_aspect_y = 1.0
+            render.film_transparent = False
+            render.use_compositing = False
+            render.use_sequencer = False
+            render.use_file_extension = False
+            render.filepath = render_path
+            render.image_settings.file_format = "PNG"
+            render.image_settings.color_mode = "RGB"
+            render.image_settings.color_depth = "8"
+
+            camera_data = bpy.data.cameras.new(".spyrite_verify")
+            camera_data.type = "ORTHO"
+            camera_data.ortho_scale = ortho_scale
+            camera_data.sensor_fit = "AUTO"
+            camera_data.clip_start = 0.01
+            camera_data.clip_end = (max(depth) - min(depth)) + 4.0
+            camera_object = bpy.data.objects.new(".spyrite_verify", camera_data)
+            scene.collection.objects.link(camera_object)
+            # Camera looks down -normal with the plane's up as its up: image x = plane right, y = plane up
+            frame = Matrix((right, up, toward_camera)).transposed().to_4x4()
+            eye = centre + toward_camera * (max(depth) - centre.dot(toward_camera) + 2.0)
+            camera_object.matrix_world = Matrix.Translation(eye) @ frame
+            scene.camera = camera_object
+
+            try:
+                _render_still()
+                if not os.path.exists(render_path):
+                    raise RuntimeError(f"no image was written to {render_path}")
+            except Exception as err:
+                raise RuntimeError(
+                    f"verify_tile_object could not render with Workbench: {err}; "
+                    f"run `make test-visual` from the host instead"
+                ) from err
+
+            image = bpy.data.images.load(render_path, check_existing=False)
+            if tuple(image.size) != (resolution, resolution):
+                raise RuntimeError(
+                    f"verify_tile_object could not render with Workbench: wrote a {tuple(image.size)} image, "
+                    f"expected {resolution}x{resolution}; run `make test-visual` from the host instead"
+                )
+            shot = _image_picture(image)
+
+            # Nearest face first: a face whose measured region lies under a nearer one is not judged
+            mesh = obj.data
+            candidates = []
+            for face in faces:
+                if Vector(face["normal"]).dot(toward_camera) <= 0.9:
+                    continue
+                points = [
+                    world_to_camera_view(scene, camera_object, world @ mesh.vertices[i].co)
+                    for i in mesh.polygons[face["index"]].vertices
+                ]
+                xs = [p.x * resolution for p in points]
+                ys = [(1.0 - p.y) * resolution for p in points]
+                box = (min(xs), min(ys), max(xs), max(ys))
+                candidates.append((Vector(face["center_m"]).dot(toward_camera), face, box))
+            candidates.sort(key=lambda item: -item[0])
+
+            tilesets, tile_pictures = {}, {}
+            nearer = []  # (depth, box)
+            measured = 0
+            max_delta = 0.0
+            mismatches = []
+            for face_depth, face, box in candidates:
+                hidden = spyrite_probe.covered(box, [b for d, b in nearer if d > face_depth + 1e-6])
+                nearer.append((face_depth, box))
+                if hidden or not face["on_grid"] or face["tile_xy"] == NO_TILE_XY or not face["tileset"]:
+                    continue
+                if box[0] < 0 or box[1] < 0 or box[2] > resolution or box[3] > resolution:
+                    continue
+                if face["tileset"] not in tilesets:
+                    tilesets[face["tileset"]] = _find_tileset(face["tileset"])
+                    tile_pictures[face["tileset"]] = _image_picture(tilesets[face["tileset"]].image)
+                tileset = tilesets[face["tileset"]]
+                tile_box = _tile_pixel_box(tileset, face["tile_xy"], face["tile_span"])
+                tile_picture = spyrite_probe.crop(tile_pictures[face["tileset"]], tile_box)
+                expected = spyrite_probe.expected_quadrants(
+                    tile_picture, face["rotation_deg"], face["flip_x"], face["flip_y"]
+                )
+                delta = spyrite_probe.compare(expected, spyrite_probe.observed_quadrants(shot, box))
+                measured += 1
+                max_delta = max(max_delta, delta)
+                if delta > tolerance:
+                    mismatches.append(
+                        {
+                            "index": face["index"],
+                            "plane": face["plane"],
+                            "cell_xy": face["cell_xy"],
+                            "tile_xy": face["tile_xy"],
+                            "max_channel_delta": round(delta, 1),
+                        }
+                    )
+        finally:
+            for key, values in saved.items():
+                for name, value in values.items():
+                    setattr(targets[key], name, value)
+            for other, hide in hidden_before.items():
+                other.hide_render = hide
+            if camera_object is not None:
+                bpy.data.objects.remove(camera_object)
+            if camera_data is not None:
+                bpy.data.cameras.remove(camera_data)
+            if image is not None:
+                bpy.data.images.remove(image)
+    finally:
+        if obj.mode != previous_mode:
+            _switch_mode(obj, previous_mode)
+        if previous_active is not None and view_layer.objects.active is not previous_active:
+            view_layer.objects.active = previous_active
+
+    mismatches.sort(key=lambda item: item["index"])
+    return {
+        "ok": measured > 0 and not mismatches,
+        "measured": measured,
+        "mismatches": mismatches,
+        "max_channel_delta": round(max_delta, 1),
+        "evidence_dir": evidence_dir,
+        "render_path": render_path,
+    }
+
+
 def set_pixel_art_view():
     """Make the scene's Workbench renders show tile textures as crisp, unlit texels.
 
@@ -2199,10 +2499,7 @@ def set_pixel_art_view():
     view_transform, viewports_textured}`` as they are now.
     """
     scene = bpy.context.scene
-    scene.display.shading.color_type = "TEXTURE"
-    scene.display.shading.light = "FLAT"
-    scene.display.render_aa = "OFF"
-    scene.view_settings.view_transform = "Standard"
+    _apply_pixel_art_scene_settings(scene)
     viewports_textured = 0
     for window in bpy.context.window_manager.windows:
         for area in window.screen.areas:

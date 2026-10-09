@@ -43,8 +43,8 @@ Three pieces, all in this repository:
 
 | Piece | Where it runs | What it does |
 |---|---|---|
-| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec` |
-| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `set_pixel_art_view`, `build_spec`, `export_spec` |
+| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec`, `verify_tile_object` (renders with Workbench and checks every visible face's pixels against its tile) |
+| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `verify_tile_object`, `set_pixel_art_view`, `build_spec`, `export_spec` |
 | `packages/spyrite_tile_gen` | on the host | MCP server `spyrite-tile-gen`: `generate_tile`, `generate_sprite`, `generate_tileset` (Retro Diffusion, paid, needs `RD_API_KEY`; or the local SDXL service), `normalize_image`, `compose_atlas`, `estimate_cost`, `list_backends` |
 | `services/pixel_server` | GPU host | FastAPI SDXL + pixel-art LoRA service behind the `local` backend (systemd user unit `spyrite-pixel.service`, port 8190) |
 
@@ -104,7 +104,10 @@ builds `spyrite_smoke_room`, asserts its faces and tiles and saves a window scre
 `outputs/live_smoke/`; `ARGS=--reload-api` picks up `sprytile_uv.py`, `sprytile_builder.py` and `api.py` edits without a restart.
 `make test-visual` (after `make test-live`) is a pixel oracle: it isolates a tile object, looks at it
 orthographically, screenshots the viewport and checks every visible face's colour against its tile in
-the tileset image (`scripts/visual_probe.py`; evidence in `outputs/visual_probe/`).
+the tileset image (`scripts/visual_probe.py`; evidence in `outputs/visual_probe/`). The same comparison
+(`addon/spyrite_tile/spyrite_probe.py`, pure Python) runs from inside Blender as the `verify_tile_object`
+op: it renders the object with Workbench from the plane's side (scene and viewport untouched) and
+returns `ok`, the number of faces judged and the mismatching faces; the render is kept in the evidence dir.
 `tests/blender/test_metamorphic.py` checks relations between runs (translation, scale, plane swap,
 rotation vs flips, order and history independence, fill vs place, remove vs place, atlas permutation,
 save/load) instead of hand-computed values.

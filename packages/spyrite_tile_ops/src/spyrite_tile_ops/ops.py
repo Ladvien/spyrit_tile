@@ -40,6 +40,7 @@ ADDON_NOT_ENABLED_MESSAGE = (
     "`make install-addon` in /Users/ladvien/spyrit_tile and restart Blender."
 )
 ALLOWED_ROTATIONS_DEG = (0, 90, 180, 270)
+VERIFY_DEFAULT_TOLERANCE = 12.0
 
 __all__ = [
     "import_tileset",
@@ -58,6 +59,7 @@ __all__ = [
     "set_pixel_art_view",
     "build_spec",
     "export_spec",
+    "verify_tile_object",
 ]
 
 
@@ -315,6 +317,29 @@ class PixelArtViewReport:
     render_aa: str
     view_transform: str
     viewports_textured: int
+
+
+@dataclass(frozen=True)
+class FaceMismatch:
+    """A face whose rendered quadrants differ from its tile by more than the tolerance (0-255 scale)."""
+
+    index: int
+    plane: str
+    cell_xy: tuple[int, int]
+    tile_xy: tuple[int, int]
+    max_channel_delta: float
+
+
+@dataclass(frozen=True)
+class VerifyReport:
+    """Result of verify_tile_object: `measured` faces judged, the mismatching ones, and where the render is."""
+
+    ok: bool
+    measured: int
+    mismatches: tuple[FaceMismatch, ...]
+    max_channel_delta: float
+    evidence_dir: str
+    render_path: str
 
 
 # --- plumbing -------------------------------------------------------------
@@ -810,4 +835,41 @@ def export_spec(objects: list[str], spec_path: Path) -> SpecExportReport:
         objects=int(result["objects"]),
         tiles=int(result["tiles"]),
         unexported_faces={name: tuple(int(i) for i in faces) for name, faces in result["unexported_faces"].items()},
+    )
+
+
+@op(reads_only=True)
+def verify_tile_object(
+    object_name: str,
+    view: Literal["auto", "top", "front", "right"] = "auto",
+    tolerance: float | None = None,
+    evidence_dir: Path | None = None,
+) -> VerifyReport:
+    """Render a tile object with Workbench and check every visible face shows its tile (pixel oracle).
+
+    Reads only: the scene is unchanged afterwards; the render is written to `evidence_dir`/render.png.
+    `tolerance` is the largest accepted colour difference per channel (0-255); None means 12.
+    """
+    result = _addon_api().verify_tile_object(
+        object_name=object_name,
+        view=view,
+        tolerance=VERIFY_DEFAULT_TOLERANCE if tolerance is None else tolerance,
+        evidence_dir=None if evidence_dir is None else str(evidence_dir),
+    )
+    return VerifyReport(
+        ok=bool(result["ok"]),
+        measured=int(result["measured"]),
+        mismatches=tuple(
+            FaceMismatch(
+                index=int(m["index"]),
+                plane=m["plane"],
+                cell_xy=_pair(m["cell_xy"]),
+                tile_xy=_pair(m["tile_xy"]),
+                max_channel_delta=float(m["max_channel_delta"]),
+            )
+            for m in result["mismatches"]
+        ),
+        max_channel_delta=float(result["max_channel_delta"]),
+        evidence_dir=result["evidence_dir"],
+        render_path=result["render_path"],
     )
