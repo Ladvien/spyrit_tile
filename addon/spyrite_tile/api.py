@@ -77,6 +77,13 @@ Specs
     given by name from the tileset's sidecar) and :func:`export_spec` writes tile objects back to one; see
     ``spyrite_spec.validate_spec`` for the schema and ``tests/fixtures/room.spyrite.yaml`` for an example.
 
+Checkpoints
+    :func:`checkpoint` copies tile objects' meshes (and grid id, pixels per unit, material slots, world
+    matrix) so a multi-step plan can :func:`rollback` after a failure; :func:`list_checkpoints` and
+    :func:`discard_checkpoint` manage them. Checkpoints are session state: the registry lives in this module
+    (so a ``reload_core`` or a file reload forgets it), and the copies are hidden ``.spyrite_ckpt_*`` meshes
+    with a fake user, which stay in the file if it is saved while checkpoints are unreleased.
+
 Behaviour shared by all editing functions
     * Inputs are validated before anything is touched; errors are
       ``ValueError`` naming the valid range.
@@ -119,11 +126,13 @@ Composite builders
 
 import array
 import importlib
+import itertools
 import math
 import numbers
 import os
 import tempfile
 from contextlib import ExitStack, contextmanager
+from datetime import datetime, timezone
 
 import bmesh
 import bpy
@@ -2525,6 +2534,145 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
         "evidence_dir": evidence_dir,
         "render_path": render_path,
     }
+
+_CHECKPOINTS = {}
+_CHECKPOINT_IDS = itertools.count(1)
+
+
+def _checkpoint_entry(checkpoint_id):
+    if isinstance(checkpoint_id, bool) or not isinstance(checkpoint_id, numbers.Integral):
+        raise ValueError(f"checkpoint_id must be an integer, got {checkpoint_id!r}")
+    entry = _CHECKPOINTS.get(int(checkpoint_id))
+    if entry is None:
+        raise ValueError(
+            f"No checkpoint {checkpoint_id}; existing checkpoint ids: {sorted(_CHECKPOINTS)} "
+            "(call checkpoint first)"
+        )
+    return entry
+
+
+@contextmanager
+def _objects_in_object_mode():
+    """Put every object in the view layer in OBJECT mode for the block; restore their modes afterwards."""
+    view_layer = bpy.context.view_layer
+    previous_active = view_layer.objects.active
+    previous_modes = {o.name: o.mode for o in view_layer.objects if o.mode != "OBJECT"}
+    for name in previous_modes:
+        _switch_mode(bpy.data.objects[name], "OBJECT")
+    try:
+        yield
+    finally:
+        for name, mode in previous_modes.items():
+            restored = bpy.data.objects.get(name)
+            if restored is not None:
+                _switch_mode(restored, mode)
+        if previous_active is not None and previous_active.name in view_layer.objects:
+            view_layer.objects.active = previous_active
+
+
+def checkpoint(object_names=None, label=""):
+    """Snapshot tile objects so :func:`rollback` can restore them.
+
+    ``object_names=None`` snapshots every tile object of :func:`describe_scene`. Each object's mesh is
+    copied into a hidden fake-user mesh ``.spyrite_ckpt_<id>_<object>``; the grid id, pixels per unit,
+    material slots and world matrix are recorded. Checkpoints are session state (see the module docstring).
+    Returns ``{checkpoint_id, objects: [names]}``.
+    """
+    if not isinstance(label, str):
+        raise ValueError(f"label must be a string, got {label!r}")
+    if object_names is None:
+        object_names = [o["object_name"] for o in describe_scene()["tile_objects"]]
+    elif isinstance(object_names, str) or not isinstance(object_names, (list, tuple)):
+        raise ValueError(f"object_names must be a list of object names or None, got {object_names!r}")
+    object_names = list(object_names)
+    if not object_names:
+        raise ValueError("No objects to checkpoint: the scene has no tile objects; call create_tile_object first")
+    objects = [_mesh_object(name) for name in object_names]
+
+    checkpoint_id = next(_CHECKPOINT_IDS)
+    recorded = {}
+    try:
+        with _objects_in_object_mode():
+            for obj in objects:
+                mesh_copy = obj.data.copy()
+                mesh_copy.name = f".spyrite_ckpt_{checkpoint_id}_{obj.name}"
+                mesh_copy.use_fake_user = True
+                recorded[obj.name] = {
+                    "mesh": mesh_copy,
+                    "gridid": int(obj.sprytile_gridid),
+                    "pixels_per_unit": obj.get(PIXELS_PER_UNIT_PROP),
+                    "materials": [slot.material.name if slot.material else None for slot in obj.material_slots],
+                    "matrix_world": obj.matrix_world.copy(),
+                }
+    except BaseException:
+        for entry in recorded.values():
+            bpy.data.meshes.remove(entry["mesh"])
+        raise
+    _CHECKPOINTS[checkpoint_id] = {
+        "label": label,
+        "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "objects": recorded,
+    }
+    return {"checkpoint_id": checkpoint_id, "objects": list(recorded)}
+
+
+def rollback(checkpoint_id):
+    """Restore every object of a checkpoint to its mesh, grid, pixels per unit, materials and matrix.
+
+    All objects must still exist, else nothing is restored. The checkpoint stays valid, so it can be rolled
+    back to again. Returns ``{checkpoint_id, restored: [names]}``.
+    """
+    entry = _checkpoint_entry(checkpoint_id)
+    checkpoint_id = int(checkpoint_id)
+    missing = [name for name in entry["objects"] if bpy.data.objects.get(name) is None]
+    if missing:
+        raise ValueError(f"checkpoint {checkpoint_id}: objects missing: {missing}; nothing was restored")
+    with _objects_in_object_mode():
+        for name, saved in entry["objects"].items():
+            obj = bpy.data.objects[name]
+            old = obj.data
+            restored = saved["mesh"].copy()
+            restored.use_fake_user = False
+            obj.data = restored
+            if old.users == 0:
+                bpy.data.meshes.remove(old)
+            restored.name = name
+            obj.sprytile_gridid = saved["gridid"]
+            if saved["pixels_per_unit"] is None:
+                obj.pop(PIXELS_PER_UNIT_PROP, None)
+            else:
+                obj[PIXELS_PER_UNIT_PROP] = saved["pixels_per_unit"]
+            current = [slot.material.name if slot.material else None for slot in obj.material_slots]
+            if current != saved["materials"]:
+                restored.materials.clear()
+                for material_name in saved["materials"]:
+                    restored.materials.append(bpy.data.materials.get(material_name) if material_name else None)
+            obj.matrix_world = saved["matrix_world"].copy()
+    return {"checkpoint_id": checkpoint_id, "restored": list(entry["objects"])}
+
+
+def discard_checkpoint(checkpoint_id):
+    """Forget a checkpoint and remove its hidden mesh copies. Returns ``{checkpoint_id, discarded: [names]}``."""
+    entry = _checkpoint_entry(checkpoint_id)
+    checkpoint_id = int(checkpoint_id)
+    for saved in entry["objects"].values():
+        if saved["mesh"].name in bpy.data.meshes:
+            bpy.data.meshes.remove(saved["mesh"])
+    del _CHECKPOINTS[checkpoint_id]
+    return {"checkpoint_id": checkpoint_id, "discarded": list(entry["objects"])}
+
+
+def list_checkpoints():
+    """Read-only: ``[{checkpoint_id, label, created (ISO-8601 UTC), objects}]``, oldest first."""
+    return [
+        {
+            "checkpoint_id": checkpoint_id,
+            "label": entry["label"],
+            "created": entry["created"],
+            "objects": list(entry["objects"]),
+        }
+        for checkpoint_id, entry in sorted(_CHECKPOINTS.items())
+    ]
 
 
 def set_pixel_art_view():
