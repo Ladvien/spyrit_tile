@@ -1245,7 +1245,7 @@ def _placement_parts(obj, tileset, parts):
     """
     flat = [placement for _, placements in parts for placement in placements]
     normalized = [_normalize_placement(i, p, tileset) for i, p in enumerate(flat)]
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
     outcomes = []
     total = _apply_placements(obj, tileset, normalized, outcomes=outcomes)
     reports = {}
@@ -1443,7 +1443,7 @@ def move_faces(object_name, face_indices, delta_px):
     if not indices:
         raise ValueError("face_indices is empty")
     delta = _as_int_tuple("delta_px", delta_px, 3)
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
 
     scene = bpy.context.scene
     ppu = _object_pixels_per_unit(obj, scene)
@@ -2107,7 +2107,7 @@ def build_spec(spec_path):
                 raise spyrite_spec.SpecError(message) from None
         plans.append((name, entry, tileset, normalized))
 
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
     objects = []
     for name, entry, tileset, normalized in plans:
         report = create_tile_object(name, tileset.material.name, entry["pixels_per_unit"])
@@ -2324,7 +2324,7 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
         _as_name("evidence_dir", evidence_dir)
         if not os.path.isabs(evidence_dir):
             raise ValueError(f"evidence_dir must be an absolute path, got {evidence_dir!r}")
-    grid = sprytile_utils.get_grid(bpy.context, obj.sprytile_gridid)
+    grid = sprytile_core.get_grid(bpy.context, obj.sprytile_gridid)
     if grid is None:
         raise ValueError(f"Object {obj.name!r} has no tileset grid (sprytile_gridid {obj.sprytile_gridid}); "
                          f"call create_tile_object first")

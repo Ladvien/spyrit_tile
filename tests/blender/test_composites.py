@@ -16,7 +16,7 @@ import bpy
 import pytest
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
-sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
 PREFIX = "composites_test_"
@@ -38,7 +38,7 @@ def _remove_test_data():
         bpy.data.meshes.remove(mesh)
     for material in [m for m in bpy.data.materials if m.name.startswith(PREFIX)]:
         bpy.data.materials.remove(material)
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)
@@ -513,7 +513,7 @@ def test_move_faces_restores_scene_settings(tile_object):
     api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [1, 1], "rotation_deg": 90, "flip_x": True}])
     data = bpy.context.scene.sprytile_data
     saved = {name: getattr(data, name) for name in ("uv_flip_x", "uv_flip_y", "mesh_rotate", "work_layer", "world_pixels")}
-    grid = sprytile_utils.get_grid(bpy.context, bpy.data.objects[OBJECT].sprytile_gridid)
+    grid = sprytile_core.get_grid(bpy.context, bpy.data.objects[OBJECT].sprytile_gridid)
     selection = tuple(grid.tile_selection)
     api.move_faces(OBJECT, [0], (16, 0, 0))
     assert {name: getattr(data, name) for name in saved} == saved
