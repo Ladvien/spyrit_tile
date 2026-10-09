@@ -366,6 +366,79 @@ def test_named_tiles_through_ops_match_api(tmp_path):
         _remove_test_data()
 
 
+def test_build_room_matches_api(tileset):
+    _create_object_pair()
+    report = ops.build_room(
+        object_name=OPS_OBJECT_NAME,
+        tileset_name=TILESET_NAME,
+        size_cells=(4, 3, 2),
+        floor_tile=(0, 0),
+        wall_tile=(1, 0),
+        ceiling_tile=(2, 0),
+    )
+    api_result = _api().build_room(
+        object_name=API_OBJECT_NAME,
+        material_name=TILESET_NAME,
+        size_cells=[4, 3, 2],
+        floor_tile=[0, 0],
+        wall_tile=[1, 0],
+        ceiling_tile=[2, 0],
+    )
+    assert report == ops.RoomReport(
+        floor=ops.TileEditReport(face_count=38, built=12),
+        walls={
+            "back": ops.TileEditReport(face_count=38, built=8),
+            "left": ops.TileEditReport(face_count=38, built=6),
+        },
+        ceiling=ops.TileEditReport(face_count=38, built=12),
+        face_count=38,
+    )
+    assert report.face_count == api_result["face_count"]
+    assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+    with pytest.raises(ValueError, match="walls may contain only 'back' and 'left'"):
+        ops.build_room(OPS_OBJECT_NAME, TILESET_NAME, (1, 1, 1), (0, 0), (1, 0), walls=("front",))
+
+
+def test_extrude_edge_matches_api(tileset):
+    _create_object_pair()
+    report = ops.extrude_edge(
+        object_name=OPS_OBJECT_NAME,
+        tileset_name=TILESET_NAME,
+        from_cell=(0, 2),
+        to_cell=(3, 2),
+        side="N",
+        count=2,
+        tile=(1, 0),
+    )
+    api_result = _api().extrude_edge(
+        object_name=API_OBJECT_NAME,
+        material_name=TILESET_NAME,
+        plane="XY",
+        plane_offset_m=0.0,
+        from_cell=[0, 2],
+        to_cell=[3, 2],
+        side="N",
+        height_cells=2,
+        tile=[1, 0],
+    )
+    assert report == ops.TileEditReport(face_count=api_result["face_count"], built=api_result["built"])
+    assert report.built == 8
+    assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+    with pytest.raises(ValueError, match="side S needs a"):
+        ops.extrude_edge(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (1, 0), "S", 1, (1, 0))
+
+
+def test_move_faces_matches_api(tileset):
+    _create_object_pair()
+    for name in (OPS_OBJECT_NAME, API_OBJECT_NAME):
+        _api().fill_tiles(name, TILESET_NAME, [0, 0], [1, 1], [2, 1], rotation_deg=90.0, flip_x=True)
+    report = ops.move_faces(OPS_OBJECT_NAME, [0, 3], (16, 0, -8))
+    api_result = _api().move_faces(API_OBJECT_NAME, [0, 3], [16, 0, -8])
+    assert report == ops.TileEditReport(face_count=api_result["face_count"], moved=api_result["moved"])
+    assert (report.moved, report.face_count) == (2, 4)
+    assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+
+
 def test_set_pixel_art_view_makes_workbench_show_unlit_texels():
     report = ops.set_pixel_art_view()
     scene = bpy.context.scene
