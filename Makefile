@@ -2,7 +2,7 @@ BLENDER ?= /Applications/Blender.app/Contents/MacOS/Blender
 ADDON_DIR ?= addon/spyrite_tile
 ADDON_ABS := $(abspath $(ADDON_DIR))
 
-.PHONY: install-addon install-blended-plugin blender-test-deps test-pure test-blender
+.PHONY: test-live install-addon install-blended-plugin blender-test-deps test-pure test-blender
 
 # Link the add-on (extension id `spyrite_tile`) into the user's Blender and
 # enable it. A symlink, so the repo is what Blender loads; restart Blender
@@ -40,3 +40,10 @@ test-blender:
 	ln -s "$(ADDON_ABS)" "$$tmp/user_default/spyrite_tile"; \
 	BLENDER_USER_EXTENSIONS="$$tmp" $(BLENDER) --background --factory-startup --python-exit-code 1 --python scripts/run_blender_tests.py; \
 	status=$$?; rm -rf "$$tmp"; exit $$status
+
+# Drive the Blender you have OPEN through blended's MCP server (the agent's path):
+# builds `spyrite_smoke_room`, textures the viewport, asserts faces/tiles, saves a
+# screenshot to outputs/live_smoke/. Needs the mcp add-on server running in Blender.
+# ARGS=--reload-api picks up add-on api.py edits without restarting Blender.
+test-live:
+	/Users/ladvien/blended/.venv/bin/python scripts/mcp_live_smoke.py $(ARGS)

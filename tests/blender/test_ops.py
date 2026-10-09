@@ -233,9 +233,20 @@ def test_fill_remove_paint_and_report_match_api(tileset):
 def test_set_pixel_art_view_makes_workbench_show_unlit_texels():
     report = ops.set_pixel_art_view()
     scene = bpy.context.scene
+    solid_viewports = [
+        area.spaces.active.shading
+        for window in bpy.context.window_manager.windows
+        for area in window.screen.areas
+        if area.type == "VIEW_3D" and area.spaces.active.shading.type == "SOLID"
+    ]
     assert report == ops.PixelArtViewReport(
-        color_type="TEXTURE", light="FLAT", render_aa="OFF", view_transform="Standard"
+        color_type="TEXTURE",
+        light="FLAT",
+        render_aa="OFF",
+        view_transform="Standard",
+        viewports_textured=len(solid_viewports),
     )
+    assert all(shading.color_type == "TEXTURE" for shading in solid_viewports)
     assert scene.display.shading.color_type == "TEXTURE"
     assert scene.display.shading.light == "FLAT"
     assert scene.display.render_aa == "OFF"

@@ -134,6 +134,7 @@ class PixelArtViewReport:
     light: str
     render_aa: str
     view_transform: str
+    viewports_textured: int
 
 
 # --- plumbing -------------------------------------------------------------
@@ -340,11 +341,12 @@ def tile_object_report(object_name: str) -> TileObjectReading:
 
 
 def set_pixel_art_view() -> PixelArtViewReport:
-    """Make Workbench renders (render_views) show tile textures as crisp unlit texels instead of grey."""
+    """Show tile textures as crisp unlit texels in Workbench renders and open Solid viewports."""
     result = _addon_api().set_pixel_art_view()
     return PixelArtViewReport(
         color_type=result["color_type"],
         light=result["light"],
         render_aa=result["render_aa"],
         view_transform=result["view_transform"],
+        viewports_textured=result["viewports_textured"],
     )

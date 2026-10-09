@@ -60,6 +60,9 @@ by `plane_offset_m`. There is no automatic fallback between generation backends.
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and
 `tests/gui/run_gui_smoke.sh` (drives the interactive tools in a GUI Blender with simulated input).
+`make test-live` drives the Blender you have open through blended's MCP server (the agent's own path),
+builds `spyrite_smoke_room`, asserts its faces and tiles and saves a window screenshot to
+`outputs/live_smoke/`; `ARGS=--reload-api` picks up `api.py` edits without a restart.
 
 ### Getting Started:
 
