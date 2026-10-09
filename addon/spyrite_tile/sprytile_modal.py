@@ -35,6 +35,28 @@ class DataObjectDict(dict):
             raise AttributeError("No such attribute: " + name)
 
 
+def set_material_preview_shading(shading):
+    """Switch a viewport to Material Preview when the active render engine allows it.
+
+    Assigning shading.type = 'MATERIAL' raises TypeError on engines that do not
+    offer it (Workbench: the settable values are only WIREFRAME/SOLID/RENDERED).
+    The enum_items listed by bl_rna are static and still contain MATERIAL there, so
+    they cannot be used to decide; the assignment itself is the only check. When it
+    is refused the shading type stays as the user set it, but Solid shading is
+    switched to the Texture colour type, otherwise the tiles show as plain grey.
+    Returns True if the shading type is MATERIAL afterwards.
+    """
+    if shading.type == 'MATERIAL':
+        return True
+    try:
+        shading.type = 'MATERIAL'
+    except TypeError:
+        if shading.type == 'SOLID':
+            shading.color_type = 'TEXTURE'
+        return False
+    return True
+
+
 class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
     """Tile based mesh creation/UV layout tool"""
     bl_idname = "sprytile.modal_tool"
@@ -448,9 +470,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         addon_prefs = context.preferences.addons[__package__].preferences
         auto_adjust = addon_prefs.auto_adjust_viewport_shading
         if auto_adjust:
-            cur_space = context.area.spaces.active
-            if cur_space.shading.type != 'MATERIAL':
-                cur_space.shading.type = 'MATERIAL'
+            set_material_preview_shading(context.area.spaces.active.shading)
 
         self.virtual_cursor = deque([], 3)
         VIEW3D_OP_SprytileModalTool.no_undo = False
