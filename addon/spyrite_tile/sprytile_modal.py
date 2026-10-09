@@ -39,7 +39,7 @@ class DataObjectDict(dict):
 class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
     """Tile based mesh creation/UV layout tool"""
     bl_idname = "sprytile.modal_tool"
-    bl_label = "Sprytile Paint"
+    bl_label = "Spyrite Tile Paint"
     bl_options = {'REGISTER'}
 
     no_undo = False
