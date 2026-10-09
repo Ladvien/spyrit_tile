@@ -114,6 +114,58 @@ class TileEditReport:
 
 
 @dataclass(frozen=True)
+class PatternTile:
+    """One tile of a pattern: a tile name or (column, row), with its own orientation."""
+
+    tile: str | tuple[int, int]
+    rotation_deg: float = 0.0
+    flip_x: bool = False
+    flip_y: bool = False
+
+
+@dataclass(frozen=True)
+class PatternSpec:
+    """A fill pattern. random: tiles + seed (+ weights). stamp: rows. autotile: autotile_tiles, 16 entries."""
+
+    kind: Literal["random", "stamp", "autotile"]
+    tiles: list[PatternTile] | None = None
+    weights: list[float] | None = None
+    seed: int | None = None
+    rows: list[list[PatternTile]] | None = None
+    autotile_tiles: list[PatternTile] | None = None
+
+
+def _pattern_tile_value(tile) -> dict:
+    if isinstance(tile, dict):
+        return tile
+    value = {"tile": list(tile.tile) if isinstance(tile.tile, tuple) else tile.tile}
+    value.update(rotation_deg=float(tile.rotation_deg), flip_x=tile.flip_x, flip_y=tile.flip_y)
+    return value
+
+
+def _pattern_value(pattern) -> dict:
+    """The add-on api's pattern dict for a PatternSpec (or an already plain dict)."""
+    if isinstance(pattern, dict):
+        return pattern
+    value: dict = {"kind": pattern.kind}
+    if pattern.kind == "random":
+        value["tiles"] = [_pattern_tile_value(t) for t in pattern.tiles or []]
+        if pattern.weights is not None:
+            value["weights"] = list(pattern.weights)
+        if pattern.seed is not None:
+            value["seed"] = pattern.seed
+    elif pattern.kind == "stamp":
+        value["rows"] = [[_pattern_tile_value(t) for t in row] for row in pattern.rows or []]
+    else:
+        value["mask"] = "edges4"
+        entries = pattern.autotile_tiles or []
+        if len(entries) != 16:
+            raise ValueError(f"autotile_tiles needs 16 entries (index = key 0..15), got {len(entries)}")
+        value["tiles"] = {str(i): _pattern_tile_value(t) for i, t in enumerate(entries)}
+    return value
+
+
+@dataclass(frozen=True)
 class PatternFillReport:
     """What a pattern fill changed: the edit counters, the cells filled and, up to 500 cells, each cell's tile."""
 
@@ -433,7 +485,7 @@ def fill_tiles(
 def fill_pattern(
     object_name: str,
     tileset_name: str,
-    pattern: dict,
+    pattern: PatternSpec,
     plane: Literal["XY", "XZ", "YZ"] = "XY",
     plane_offset_m: float = 0.0,
     layer: Literal["BASE", "DECAL"] = "BASE",
@@ -443,13 +495,13 @@ def fill_pattern(
 ) -> PatternFillReport:
     """Fill cells with a seeded random, stamp or autotile pattern; give cell_min_xy+cell_max_xy or cells.
 
-    random: tiles, optional weights, seed. stamp: rows (rows[0] is the top row). autotile: mask "edges4" and
-    tiles keyed "0".."15" (N=1, E=2, S=4, W=8 for each neighbour cell in the fill set).
+    random: tiles, optional weights, seed. stamp: rows (rows[0] is the top row). autotile: autotile_tiles, the
+    16 tiles indexed by key N=1, E=2, S=4, W=8 (one bit per neighbour cell in the fill set).
     """
     result = _addon_api().fill_pattern(
         object_name=object_name,
         material_name=tileset_name,
-        pattern=pattern,
+        pattern=_pattern_value(pattern),
         plane=plane,
         plane_offset_m=plane_offset_m,
         layer=layer,

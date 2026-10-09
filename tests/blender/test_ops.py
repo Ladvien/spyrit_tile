@@ -137,11 +137,16 @@ def test_create_tile_object_matches_api(tileset):
 
 def test_fill_pattern_matches_api(tileset):
     _create_object_pair()
-    pattern = {"kind": "random", "tiles": [[0, 0], [1, 1], [2, 2]], "seed": 5}
+    pattern = {"kind": "random", "tiles": [{"tile": [0, 0]}, {"tile": [1, 1]}, {"tile": [2, 2]}], "seed": 5}
+    spec = ops.PatternSpec(
+        kind="random",
+        tiles=[ops.PatternTile(tile=(0, 0)), ops.PatternTile(tile=(1, 1)), ops.PatternTile(tile=(2, 2))],
+        seed=5,
+    )
     report = ops.fill_pattern(
         object_name=OPS_OBJECT_NAME,
         tileset_name=TILESET_NAME,
-        pattern=pattern,
+        pattern=spec,
         cell_min_xy=(0, 0),
         cell_max_xy=(2, 2),
     )
