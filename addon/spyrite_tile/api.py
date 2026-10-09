@@ -98,6 +98,10 @@ Tile names
     Wherever a tile is given (placement ``tile`` / ``tile_xy``, ``fill_tiles``, ``paint_faces``) a name works
     as well as ``[column, row]``; a name whose ``planes`` exclude the placement plane is refused.
     ``create_tileset`` reports ``tile_names`` and ``describe_tile_object`` faces carry ``tile``.
+
+Pattern fills
+    :func:`fill_pattern` fills a rectangle or an explicit cell list with a ``random`` (seeded), ``stamp``
+    or ``autotile`` (``edges4``, keys ``"0".."15"``) pattern through one :func:`place_tiles` call.
 """
 
 import math
