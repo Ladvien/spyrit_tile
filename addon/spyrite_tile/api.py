@@ -59,6 +59,13 @@ Layers
     different ``plane_offset_m`` than their base: pass the shifted offset to
     :func:`remove_tiles` to remove them.
 
+Reading back
+    :func:`describe_tile_object` reports, per face, everything the placement took: ``tile_xy``, ``tile_span``,
+    ``rotation_deg``, ``flip_x``, ``flip_y``, ``layer``, ``plane``, ``facing``, ``plane_offset_m``, ``cell_xy``
+    and ``on_grid`` (false for geometry that is not a whole-cell rectangle), so a scene can be rebuilt from
+    its report. A decal reports its lifted ``plane_offset_m``. :func:`describe_scene` lists the tilesets, the
+    tile objects and the scene settings.
+
 Behaviour shared by all editing functions
     * Inputs are validated before anything is touched; errors are
       ``ValueError`` naming the valid range.
@@ -103,6 +110,7 @@ __all__ = [
     "remove_tiles",
     "paint_faces",
     "describe_tile_object",
+    "describe_scene",
     "set_pixel_art_view",
 ]
 
@@ -827,22 +835,26 @@ def paint_faces(object_name, material_name, face_indices, tile_xy, rotation_deg=
 # ---------------------------------------------------------------------------
 
 
-def _face_tile_xy(obj, mesh, face, layers, tileset_cache):
-    """(column from left, row from top) of a face's tile, or NO_TILE_XY when it carries no tile data."""
-    grid_id_layer, tile_id_layer, width_layer, height_layer, origin_layer = layers
-    if grid_id_layer is None or tile_id_layer is None:
-        return list(NO_TILE_XY)
-    grid_id = face[grid_id_layer]
+def _cached_tileset(obj, grid_id, tileset_cache):
+    """The _Tileset of a grid id (cached per call), or None when the grid or its image is gone."""
     if grid_id not in tileset_cache:
         grid = sprytile_utils.get_grid(bpy.context, grid_id)
         image = sprytile_utils.get_grid_texture(obj, grid) if grid is not None else None
-        if grid is None or image is None:
+        material = sprytile_utils.get_grid_material(grid) if image is not None else None
+        mat_data = sprytile_utils.get_mat_data(bpy.context, material.name) if material is not None else None
+        if grid is None or image is None or material is None or mat_data is None:
             tileset_cache[grid_id] = None
         else:
-            material = sprytile_utils.get_grid_material(grid)
-            mat_data = sprytile_utils.get_mat_data(bpy.context, material.name)
             tileset_cache[grid_id] = _Tileset(material, mat_data, grid, image)
-    tileset = tileset_cache[grid_id]
+    return tileset_cache[grid_id]
+
+
+def _face_tile_xy(obj, mesh, face, layers, tileset_cache):
+    """(column from left, row from top) of a face's tile, or NO_TILE_XY when it carries no tile data."""
+    grid_id_layer, tile_id_layer, width_layer, height_layer, origin_layer = layers[:5]
+    if grid_id_layer is None or tile_id_layer is None:
+        return list(NO_TILE_XY)
+    tileset = _cached_tileset(obj, face[grid_id_layer], tileset_cache)
     if tileset is None:
         return list(NO_TILE_XY)
 
@@ -859,13 +871,96 @@ def _face_tile_xy(obj, mesh, face, layers, tileset_cache):
     return [column, tileset.rows - 1 - (row_from_bottom + height - 1)]
 
 
+def _decode_orientation(paint_settings):
+    """(rotation_deg, flip_x, flip_y) of a face's ``paint_settings`` bitmask; inverse of ``_sprytile_flips``.
+
+    Bits 10-11 hold the turn (0, 3, 2, 1 for 0, 90, 180, 270 degrees), bit 9 Sprytile's ``uv_flip_x`` and
+    bit 8 ``uv_flip_y`` (``sprytile_utils.get_paint_settings``). Sprytile mirrors before turning, so for a
+    quarter turn the two flags trade places back to the documented mirror-as-seen flips.
+    """
+    rotation = {0: 0, 3: 90, 2: 180, 1: 270}[(paint_settings >> 10) & 3]
+    sprytile_x = bool((paint_settings >> 9) & 1)
+    sprytile_y = bool((paint_settings >> 8) & 1)
+    if rotation % 180 == 90:
+        return rotation, sprytile_y, sprytile_x
+    return rotation, sprytile_x, sprytile_y
+
+
+def _face_plane(normal):
+    """(plane, facing) of a world normal: 'XY'/'XZ'/'YZ' and +1 along the plane's normal, -1 against it.
+
+    (None, 0) when the normal is not axis aligned.
+    """
+    axis = max(range(3), key=lambda k: abs(normal[k]))
+    if abs(normal[axis]) < 0.999:
+        return None, 0
+    plane = {2: "XY", 1: "XZ", 0: "YZ"}[axis]
+    return plane, 1 if normal[axis] * PLANES[plane]["normal"][axis] > 0 else -1
+
+
+def _face_cell(verts_world, plane, cell_w, cell_h):
+    """((column, row), plane_offset_m, on_grid) of a face's world vertices on ``plane``.
+
+    The cell is the one holding the face's minimum corner. ``on_grid`` means the face is a rectangle whose
+    corners all sit on cell boundaries, all on one plane offset: what ``place_tiles`` builds.
+    """
+    spec = PLANES[plane]
+    axis = spec["axis"]
+    right = [sum(v[i] * spec["right"][i] for i in range(3)) for v in verts_world]
+    up = [sum(v[i] * spec["up"][i] for i in range(3)) for v in verts_world]
+    offsets = [v[axis] for v in verts_world]
+    offset = round(sum(offsets) / len(offsets), 6)
+    min_right, max_right = min(right), max(right)
+    min_up, max_up = min(up), max(up)
+    cell = (
+        math.floor(min_right / cell_w + CELL_EDGE_EPSILON),
+        math.floor(min_up / cell_h + CELL_EDGE_EPSILON),
+    )
+
+    def on_boundary(low, high, size):
+        extent = high - low
+        count = round(extent / size)
+        return (
+            count >= 1
+            and abs(extent - count * size) <= PLANE_TOLERANCE_M
+            and abs(low - round(low / size) * size) <= PLANE_TOLERANCE_M
+        )
+
+    corners = all(
+        (abs(r - min_right) <= PLANE_TOLERANCE_M or abs(r - max_right) <= PLANE_TOLERANCE_M)
+        and (abs(u - min_up) <= PLANE_TOLERANCE_M or abs(u - max_up) <= PLANE_TOLERANCE_M)
+        for r, u in zip(right, up)
+    )
+    on_grid = (
+        len(verts_world) == 4
+        and corners
+        and on_boundary(min_right, max_right, cell_w)
+        and on_boundary(min_up, max_up, cell_h)
+        and all(abs(o - offset) <= PLANE_TOLERANCE_M for o in offsets)
+    )
+    return cell, offset, on_grid
+
+
 def describe_tile_object(object_name, max_faces=500):
-    """Read back the geometry of a tile object.
+    """Read back the geometry and orientation of a tile object.
 
     Returns ``{object_name, face_count, truncated, faces}`` where each face (the first ``max_faces`` by index)
-    is ``{index, center_m, normal, tile_xy, material}`` in world space; ``tile_xy`` is
-    (column from left, row from top) of the face's tile (of the top-left tile for multi tile faces) or
-    [-1, -1] for a face without tile data, and ``material`` is the face's material name ('' if none).
+    is a dict in world space with:
+
+    - ``index``, ``center_m``, ``normal`` and ``material`` (the face's material name, '' if none);
+    - ``tile_xy``: (column from left, row from top) of the face's tile (of the top-left tile for multi tile
+      faces) or [-1, -1] for a face without tile data; ``tile_span`` [columns, rows] of the tiles it shows;
+    - ``rotation_deg``, ``flip_x``, ``flip_y``: the orientation exactly as given to ``place_tiles`` (0, False,
+      False when the face has no paint settings);
+    - ``layer``: 'BASE' or 'DECAL';
+    - ``plane`` ('XY', 'XZ', 'YZ', or None when the face is not axis aligned), ``facing`` (+1 along the
+      plane's normal, -1 against it, 0 without plane), ``plane_offset_m`` (the plane coordinate the face lies
+      at; a decal reports its lifted offset), ``cell_xy`` (cell holding the face's minimum corner, None
+      without plane) and ``on_grid`` (true for a rectangle aligned to whole cells on one offset, i.e. what
+      ``place_tiles`` builds; false for hand modelled geometry);
+    - ``tileset``: material name of the face's tileset ('' if none); ``tile``: tile name, None until the
+      tileset has names.
+
     Works in any mode without changing it.
     """
     obj = _mesh_object(object_name)
@@ -888,10 +983,14 @@ def describe_tile_object(object_name, max_faces=500):
             mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_HEIGHT),
             mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_ORIGIN),
         )
+        paint_layer = mesh.faces.layers.int.get(UvDataLayers.PAINT_SETTINGS)
+        work_layer = mesh.faces.layers.int.get(UvDataLayers.WORK_LAYER)
         world = obj.matrix_world
         normal_matrix = world.to_3x3().inverted_safe().transposed()
         slots = obj.material_slots
+        ppu = _object_pixels_per_unit(obj, bpy.context.scene)
         tileset_cache = {}
+        object_tileset = _cached_tileset(obj, obj.sprytile_gridid, tileset_cache)
         faces = []
         face_count = len(mesh.faces)
         for face in mesh.faces:
@@ -900,12 +999,50 @@ def describe_tile_object(object_name, max_faces=500):
             center = world @ face.calc_center_bounds()
             normal = (normal_matrix @ face.normal).normalized()
             slot_material = slots[face.material_index].material if face.material_index < len(slots) else None
+            tileset = None
+            if layers[0] is not None:
+                tileset = _cached_tileset(obj, face[layers[0]], tileset_cache)
+            width = max(1, face[layers[2]]) if layers[2] is not None else 1
+            height = max(1, face[layers[3]]) if layers[3] is not None else 1
+            if paint_layer is not None:
+                rotation_deg, flip_x, flip_y = _decode_orientation(face[paint_layer])
+            else:
+                rotation_deg, flip_x, flip_y = 0, False, False
+            layer = "DECAL" if work_layer is not None and face[work_layer] != 0 else "BASE"
+            plane, facing = _face_plane(normal)
+            cell_xy = None
+            plane_offset_m = None
+            on_grid = False
+            if plane is not None:
+                grid = (tileset or object_tileset).grid if (tileset or object_tileset) is not None else None
+                verts_world = [world @ v.co for v in face.verts]
+                if grid is not None:
+                    cell, plane_offset_m, on_grid = _face_cell(
+                        verts_world, plane, grid.grid[0] / ppu, grid.grid[1] / ppu
+                    )
+                    cell_xy = list(cell)
+                else:
+                    plane_offset_m = round(
+                        sum(v[PLANES[plane]["axis"]] for v in verts_world) / len(verts_world), 6
+                    )
             faces.append(
                 {
                     "index": face.index,
                     "center_m": [round(c, 6) for c in center],
                     "normal": [round(c, 6) for c in normal],
                     "tile_xy": _face_tile_xy(obj, mesh, face, layers, tileset_cache),
+                    "tile_span": [width, height],
+                    "rotation_deg": rotation_deg,
+                    "flip_x": flip_x,
+                    "flip_y": flip_y,
+                    "layer": layer,
+                    "plane": plane,
+                    "facing": facing,
+                    "plane_offset_m": plane_offset_m,
+                    "cell_xy": cell_xy,
+                    "on_grid": on_grid,
+                    "tileset": tileset.material.name if tileset is not None else "",
+                    "tile": None,
                     "material": slot_material.name if slot_material is not None else "",
                 }
             )
@@ -917,6 +1054,86 @@ def describe_tile_object(object_name, max_faces=500):
         "face_count": face_count,
         "truncated": face_count > len(faces),
         "faces": faces,
+    }
+
+
+def describe_scene():
+    """Read back every tileset and tile object of the scene.
+
+    Returns ``{tilesets, tile_objects, removed_tilesets, settings}``:
+
+    - ``tilesets``: one per ``scene.sprytile_mats`` entry that has a grid and an image texture:
+      ``{material_name, image_name, image_path (absolute), image_size_px, tile_size_px, padding_px,
+      margin_px, columns, rows, grid_id, tile_names}`` (``tile_names`` is ``{}`` until tilesets carry names);
+    - ``tile_objects``: every mesh object of the view layer bound to a tileset:
+      ``{object_name, material_name, grid_id, pixels_per_unit, face_count, location_m, overlay_of}``
+      (``overlay_of`` is None until overlay objects exist);
+    - ``removed_tilesets``: material names hidden with the grid "-" button this session;
+    - ``settings``: ``{world_pixels, mesh_decal_offset, auto_merge}`` of ``scene.sprytile_data``.
+    """
+    context = bpy.context
+    scene = context.scene
+    sprytile_utils.ensure_scene_setup(scene)
+
+    tilesets = []
+    for mat_data in scene.sprytile_mats:
+        material = bpy.data.materials.get(mat_data.mat_id)
+        if material is None or len(mat_data.grids) == 0:
+            continue
+        image = sprytile_utils.get_material_texture(material)
+        if image is None:
+            continue
+        tileset = _Tileset(material, mat_data, mat_data.grids[0], image)
+        grid = tileset.grid
+        tilesets.append(
+            {
+                "material_name": material.name,
+                "image_name": image.name,
+                "image_path": bpy.path.abspath(image.filepath),
+                "image_size_px": list(tileset.image_size),
+                "tile_size_px": list(grid.grid),
+                "padding_px": list(grid.padding),
+                "margin_px": list(grid.margin),
+                "columns": tileset.columns,
+                "rows": tileset.rows,
+                "grid_id": grid.id,
+                "tile_names": {},
+            }
+        )
+
+    tile_objects = []
+    for obj in context.view_layer.objects:
+        if obj.type != "MESH" or obj.sprytile_gridid == -1:
+            continue
+        grid = sprytile_utils.get_grid(context, obj.sprytile_gridid)
+        material = sprytile_utils.get_grid_material(grid) if grid is not None else None
+        tile_objects.append(
+            {
+                "object_name": obj.name,
+                "material_name": material.name if material is not None else "",
+                "grid_id": obj.sprytile_gridid,
+                "pixels_per_unit": _object_pixels_per_unit(obj, scene),
+                "face_count": len(obj.data.polygons) if obj.mode != "EDIT" else len(bmesh.from_edit_mesh(obj.data).faces),
+                "location_m": [round(c, 6) for c in obj.matrix_world.translation],
+                "overlay_of": None,
+            }
+        )
+
+    removed = [
+        material.name
+        for material in bpy.data.materials
+        if material.session_uid in sprytile_utils._removed_tilesets
+    ]
+    data = scene.sprytile_data
+    return {
+        "tilesets": tilesets,
+        "tile_objects": tile_objects,
+        "removed_tilesets": removed,
+        "settings": {
+            "world_pixels": data.world_pixels,
+            "mesh_decal_offset": data.mesh_decal_offset,
+            "auto_merge": data.auto_merge,
+        },
     }
 
 

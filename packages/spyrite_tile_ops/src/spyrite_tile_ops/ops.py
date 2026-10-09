@@ -49,6 +49,7 @@ __all__ = [
     "remove_tiles",
     "paint_faces",
     "tile_object_report",
+    "scene_report",
     "set_pixel_art_view",
 ]
 
@@ -107,13 +108,31 @@ class TileEditReport:
 
 @dataclass(frozen=True)
 class TileFaceReading:
-    """One face: world center and normal, and the tile its UVs show (column from left, row from top)."""
+    """One face: world center and normal, the tile its UVs show (column from left, row from top) and how it was placed.
+
+    `rotation_deg`, `flip_x`, `flip_y`, `layer`, `plane`, `plane_offset_m` and `cell_xy` read back exactly what
+    place_tiles was given; `facing` is +1 along the plane's normal, -1 against it, 0 without plane; `on_grid` is
+    false for faces that are not whole-cell rectangles (then `cell_xy` is only the cell of the minimum corner).
+    `tile` is the tile's name, None when the tileset has no names.
+    """
 
     index: int
     center_m: tuple[float, float, float]
     normal: tuple[float, float, float]
     tile_xy: tuple[int, int]
     material: str
+    tile_span: tuple[int, int]
+    rotation_deg: int
+    flip_x: bool
+    flip_y: bool
+    layer: Literal["BASE", "DECAL"]
+    plane: Literal["XY", "XZ", "YZ"] | None
+    facing: int
+    plane_offset_m: float | None
+    cell_xy: tuple[int, int] | None
+    on_grid: bool
+    tileset: str
+    tile: str | None
 
 
 @dataclass(frozen=True)
@@ -124,6 +143,48 @@ class TileObjectReading:
     face_count: int
     truncated: bool
     faces: tuple[TileFaceReading, ...]
+
+
+@dataclass(frozen=True)
+class TilesetReading:
+    """A tileset of the scene: its image and tile layout."""
+
+    material_name: str
+    image_name: str
+    image_path: str
+    image_size_px: tuple[int, int]
+    tile_size_px: tuple[int, int]
+    padding_px: tuple[int, int]
+    margin_px: tuple[int, int, int, int]
+    columns: int
+    rows: int
+    grid_id: int
+    tile_names: dict[str, dict]
+
+
+@dataclass(frozen=True)
+class TileObjectSummary:
+    """A tile object of the scene; `overlay_of` names the base object of an overlay, else None."""
+
+    object_name: str
+    material_name: str
+    grid_id: int
+    pixels_per_unit: int
+    face_count: int
+    location_m: tuple[float, float, float]
+    overlay_of: str | None
+
+
+@dataclass(frozen=True)
+class SceneReading:
+    """Every tileset and tile object of the scene, the tilesets removed this session and the scene settings."""
+
+    tilesets: tuple[TilesetReading, ...]
+    tile_objects: tuple[TileObjectSummary, ...]
+    removed_tilesets: tuple[str, ...]
+    world_pixels: int
+    mesh_decal_offset: float
+    auto_merge: bool
 
 
 @dataclass(frozen=True)
@@ -321,7 +382,7 @@ def paint_faces(
 
 @op(reads_only=True)
 def tile_object_report(object_name: str) -> TileObjectReading:
-    """List a tile object's faces: index, world center, normal and tile_xy (column from left, row from top)."""
+    """List a tile object's faces: index, world center, normal, tile_xy (column from left, row from top), orientation, plane, cell and layer."""
     result = _addon_api().describe_tile_object(object_name=object_name)
     return TileObjectReading(
         object_name=result["object_name"],
@@ -334,9 +395,62 @@ def tile_object_report(object_name: str) -> TileObjectReading:
                 normal=_triple(face["normal"]),
                 tile_xy=_pair(face["tile_xy"]),
                 material=face["material"],
+                tile_span=_pair(face["tile_span"]),
+                rotation_deg=int(face["rotation_deg"]),
+                flip_x=bool(face["flip_x"]),
+                flip_y=bool(face["flip_y"]),
+                layer=face["layer"],
+                plane=face["plane"],
+                facing=int(face["facing"]),
+                plane_offset_m=None if face["plane_offset_m"] is None else float(face["plane_offset_m"]),
+                cell_xy=None if face["cell_xy"] is None else _pair(face["cell_xy"]),
+                on_grid=bool(face["on_grid"]),
+                tileset=face["tileset"],
+                tile=face["tile"],
             )
             for face in result["faces"]
         ),
+    )
+
+
+@op(reads_only=True)
+def scene_report() -> SceneReading:
+    """List every tileset (image, tile layout, names) and tile object (counts, location) of the scene."""
+    result = _addon_api().describe_scene()
+    settings = result["settings"]
+    return SceneReading(
+        tilesets=tuple(
+            TilesetReading(
+                material_name=t["material_name"],
+                image_name=t["image_name"],
+                image_path=t["image_path"],
+                image_size_px=_pair(t["image_size_px"]),
+                tile_size_px=_pair(t["tile_size_px"]),
+                padding_px=_pair(t["padding_px"]),
+                margin_px=tuple(int(v) for v in t["margin_px"]),
+                columns=int(t["columns"]),
+                rows=int(t["rows"]),
+                grid_id=int(t["grid_id"]),
+                tile_names=dict(t["tile_names"]),
+            )
+            for t in result["tilesets"]
+        ),
+        tile_objects=tuple(
+            TileObjectSummary(
+                object_name=o["object_name"],
+                material_name=o["material_name"],
+                grid_id=int(o["grid_id"]),
+                pixels_per_unit=int(o["pixels_per_unit"]),
+                face_count=int(o["face_count"]),
+                location_m=_triple(o["location_m"]),
+                overlay_of=o["overlay_of"],
+            )
+            for o in result["tile_objects"]
+        ),
+        removed_tilesets=tuple(result["removed_tilesets"]),
+        world_pixels=int(settings["world_pixels"]),
+        mesh_decal_offset=float(settings["mesh_decal_offset"]),
+        auto_merge=bool(settings["auto_merge"]),
     )
 
 
