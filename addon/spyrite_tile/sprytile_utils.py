@@ -751,28 +751,36 @@ class UTIL_OP_SprytileGridRemove(bpy.types.Operator):
         return self.invoke(context, None)
 
     def invoke(self, context, event):
-        self.delete_grid(context)
-        return {'FINISHED'}
+        level, message = self.delete_grid(context)
+        self.report({level}, message)
+        return {'CANCELLED'} if level == 'WARNING' else {'FINISHED'}
 
     @staticmethod
     def delete_grid(context):
-        mat_list = context.scene.sprytile_mats
-        target_mat = None
+        """Remove the selected grid; the last grid of a tileset removes the tileset from the list.
 
-        if len(mat_list) > 0:
-            target_mat = mat_list[0]
-
-        grid_id = context.object.sprytile_gridid
+        The material and its image are left alone, objects may still use them.
+        Returns (report level, message).
+        """
+        scene = context.scene
+        obj = context.object
+        grid_id = obj.sprytile_gridid
 
         target_grid = get_grid(context, grid_id)
-        if target_grid is not None:
-            for mat in mat_list:
-                if mat.mat_id == target_grid.mat_id:
+        if target_grid is None:
+            return 'WARNING', "No tile grid selected"
+
+        target_mat = get_mat_data(context, target_grid.mat_id)
+        if target_mat is None:
+            for mat in scene.sprytile_mats:
+                if any(grid.id == grid_id for grid in mat.grids):
                     target_mat = mat
                     break
+        if target_mat is None:
+            return 'WARNING', "Selected grid belongs to no tileset"
 
-        if target_mat is None or len(target_mat.grids) <= 1:
-            return
+        if len(target_mat.grids) <= 1:
+            return 'INFO', UTIL_OP_SprytileGridRemove.remove_tileset(context, target_mat)
 
         grid_idx = -1
         for idx, grid in enumerate(target_mat.grids):
@@ -782,6 +790,41 @@ class UTIL_OP_SprytileGridRemove(bpy.types.Operator):
 
         target_mat.grids.remove(grid_idx)
         bpy.ops.sprytile.build_grid_list()
+        return 'INFO', "Removed grid {0} from tileset {1}".format(grid_id, target_mat.mat_id)
+
+    @staticmethod
+    def remove_tileset(context, mat_data):
+        """Drop mat_data from scene.sprytile_mats and the list display; keep the material and image.
+
+        Objects of the scene that used one of its grids are pointed at the
+        first remaining grid, or -1 when none is left. validate_grids is told
+        not to add the material again.
+        """
+        scene = context.scene
+        mat_id = mat_data.mat_id
+        removed_ids = {grid.id for grid in mat_data.grids}
+
+        for idx, mat in enumerate(scene.sprytile_mats):
+            if mat == mat_data:
+                scene.sprytile_mats.remove(idx)
+                break
+
+        material = bpy.data.materials.get(mat_id)
+        if material is not None:
+            _removed_tilesets.add(material.session_uid)
+
+        fallback_id = -1
+        for mat in scene.sprytile_mats:
+            if len(mat.grids) > 0:
+                fallback_id = mat.grids[0].id
+                break
+        for scene_obj in scene.objects:
+            if scene_obj.sprytile_gridid in removed_ids:
+                scene_obj.sprytile_gridid = fallback_id
+
+        scene.sprytile_list["idx"] = 0
+        build_grid_list(scene, context.object)
+        return "Removed tileset {0} from the Sprytile list (its material and image are kept)".format(mat_id)
 
 
 class UTIL_OP_SprytileGridCycle(bpy.types.Operator):
@@ -1153,12 +1196,24 @@ class UTIL_OP_SprytileSetupTexture(bpy.types.Operator):
         # target_slot.texture_coords = 'UV'
 
 
+# session_uid of the materials the user removed from the tileset list with
+# the grid "-" button. validate_grids does not add them back; api.create_tileset
+# lifts the mark. Only valid within one Blender session / loaded file.
+_removed_tilesets = set()
+
+
+def restore_removed_tileset(material):
+    """Let validate_grids list the material again (it was removed with the grid "-" button)."""
+    _removed_tilesets.discard(material.session_uid)
+
+
 def validate_grids(scene, active_object=None):
     """Reconcile scene.sprytile_mats with the materials in the file.
 
     Re-points renamed materials, drops entries without a usable image
     texture node or without users, and adds a grid entry for every material
-    that carries an image texture. When active_object is given its
+    that carries an image texture, except tilesets removed with the grid "-"
+    button. When active_object is given its
     sprytile_gridid is moved to the newest grid. Then rebuilds the grid list.
     """
     mat_list = bpy.data.materials
@@ -1174,6 +1229,8 @@ def validate_grids(scene, active_object=None):
         # Loop through materials looking for one
         # that doesn't appear in sprytile_mats list
         for check_mat in mat_list:
+            if check_mat.session_uid in _removed_tilesets:
+                continue
             mat_unused = True
             for mat_data in mat_data_list:
                 if mat_data.mat_id == check_mat.name:
@@ -1218,7 +1275,7 @@ def validate_grids(scene, active_object=None):
     # Loop through available materials, checking if mat_data_list has
     # at least one entry for each material
     for mat in mat_list:
-        if mat.users == 0:
+        if mat.users == 0 or mat.session_uid in _removed_tilesets:
             continue
         is_mat_valid = False
         for mat_data in mat_data_list:
