@@ -811,6 +811,192 @@ def fill_tiles(
     return place_tiles(object_name, material_name, placements)
 
 
+_PATTERN_KINDS = {
+    "random": {"kind", "tiles", "weights", "seed"},
+    "stamp": {"kind", "rows"},
+    "autotile": {"kind", "mask", "tiles"},
+}
+_TILE_ENTRY_KEYS = {"tile", "rotation_deg", "flip_x", "flip_y"}
+_AUTOTILE_BITS = (("N", 1, (0, 1)), ("E", 2, (1, 0)), ("S", 4, (0, -1)), ("W", 8, (-1, 0)))
+_PATTERN_ASSIGNMENT_LIMIT = 500
+
+
+def _pattern_tile(label, entry):
+    """Normalise one pattern tile: a name, ``[c, r]`` or ``{tile, rotation_deg, flip_x, flip_y}``."""
+    if isinstance(entry, dict):
+        unknown = set(entry) - _TILE_ENTRY_KEYS
+        if unknown or "tile" not in entry:
+            raise ValueError(
+                f"{label}: a tile object needs 'tile' and may have only {sorted(_TILE_ENTRY_KEYS)}; "
+                f"got keys {sorted(entry)}"
+            )
+        return {
+            "tile": entry["tile"],
+            "rotation_deg": entry.get("rotation_deg", 0.0),
+            "flip_x": entry.get("flip_x", False),
+            "flip_y": entry.get("flip_y", False),
+        }
+    return {"tile": entry, "rotation_deg": 0.0, "flip_x": False, "flip_y": False}
+
+
+def _pattern_cells(cell_min_xy, cell_max_xy, cells):
+    """Fill set as a row-major (y outer, x inner, ascending) list of unique ``(x, y)``."""
+    rect = cell_min_xy is not None or cell_max_xy is not None
+    if rect == (cells is not None):
+        raise ValueError("fill_pattern needs exactly one of (cell_min_xy and cell_max_xy) or cells")
+    if rect:
+        if cell_min_xy is None or cell_max_xy is None:
+            raise ValueError("cell_min_xy and cell_max_xy must be given together")
+        lo = _as_int_tuple("cell_min_xy", cell_min_xy, 2)
+        hi = _as_int_tuple("cell_max_xy", cell_max_xy, 2)
+        if hi[0] < lo[0] or hi[1] < lo[1]:
+            raise ValueError(f"cell_max_xy {hi} must be >= cell_min_xy {lo} in both components")
+        return [(x, y) for y in range(lo[1], hi[1] + 1) for x in range(lo[0], hi[0] + 1)]
+    if isinstance(cells, (str, bytes, dict)) or not hasattr(cells, "__iter__"):
+        raise ValueError(f"cells must be a list of [x, y], got {type(cells).__name__}")
+    unique = {_as_int_tuple(f"cells[{i}]", c, 2) for i, c in enumerate(cells)}
+    if not unique:
+        raise ValueError("cells is empty")
+    return sorted(unique, key=lambda c: (c[1], c[0]))
+
+
+def _pattern_assign(pattern, cells):
+    """Return one normalised tile entry per cell (same order as ``cells``) for a validated-by-kind pattern."""
+    import random
+
+    if not isinstance(pattern, dict):
+        raise ValueError(f"pattern must be a dict, got {type(pattern).__name__}")
+    kind = pattern.get("kind")
+    if kind not in _PATTERN_KINDS:
+        raise ValueError(f"pattern.kind must be one of {sorted(_PATTERN_KINDS)}, got {kind!r}")
+    unknown = set(pattern) - _PATTERN_KINDS[kind]
+    if unknown:
+        raise ValueError(
+            f"pattern has unknown keys {sorted(unknown)} for kind {kind!r}; valid keys are "
+            f"{sorted(_PATTERN_KINDS[kind])}"
+        )
+    if kind == "random":
+        raw = pattern.get("tiles")
+        if isinstance(raw, (str, bytes, dict)) or not hasattr(raw, "__iter__") or not list(raw):
+            raise ValueError("pattern.tiles must be a non-empty list of tiles")
+        tiles = [_pattern_tile(f"pattern.tiles[{i}]", t) for i, t in enumerate(raw)]
+        weights = pattern.get("weights")
+        if weights is not None:
+            if isinstance(weights, (str, bytes, dict)) or not hasattr(weights, "__iter__"):
+                raise ValueError("pattern.weights must be a list of numbers")
+            weights = [_as_float(f"pattern.weights[{i}]", w) for i, w in enumerate(weights)]
+            if len(weights) != len(tiles):
+                raise ValueError(f"pattern.weights has {len(weights)} entries but pattern.tiles has {len(tiles)}")
+            if any(w <= 0 for w in weights):
+                raise ValueError(f"pattern.weights must all be > 0, got {weights}")
+        if "seed" not in pattern:
+            raise ValueError("pattern.seed is required for kind 'random' (an int; same seed gives the same result)")
+        seed = _as_int("pattern.seed", pattern["seed"])
+        rng = random.Random(seed)
+        return [rng.choices(tiles, weights)[0] for _ in cells]
+    if kind == "stamp":
+        rows = pattern.get("rows")
+        if isinstance(rows, (str, bytes, dict)) or not hasattr(rows, "__iter__"):
+            raise ValueError("pattern.rows must be a non-empty list of lists of tiles")
+        rows = [list(r) if hasattr(r, "__iter__") and not isinstance(r, (str, bytes, dict)) else r for r in rows]
+        if not rows or not all(isinstance(r, list) and r for r in rows):
+            raise ValueError("pattern.rows must be a non-empty list of non-empty lists of tiles")
+        width = len(rows[0])
+        if any(len(r) != width for r in rows):
+            raise ValueError(f"pattern.rows must be rectangular; row lengths are {[len(r) for r in rows]}")
+        grid = [[_pattern_tile(f"pattern.rows[{j}][{i}]", t) for i, t in enumerate(r)] for j, r in enumerate(rows)]
+        x0 = min(c[0] for c in cells)
+        y1 = max(c[1] for c in cells)
+        return [grid[(y1 - y) % len(grid)][(x - x0) % width] for x, y in cells]
+    # autotile
+    if pattern.get("mask") != "edges4":
+        raise ValueError(f"pattern.mask must be 'edges4', got {pattern.get('mask')!r}")
+    mapping = pattern.get("tiles")
+    if not isinstance(mapping, dict):
+        raise ValueError("pattern.tiles must be a dict with the keys '0'..'15'")
+    mapping = {str(k): v for k, v in mapping.items()}
+    missing = [str(k) for k in range(16) if str(k) not in mapping]
+    if missing:
+        raise ValueError(f"pattern.tiles is missing autotile keys {missing}; all of '0'..'15' are required")
+    extra = sorted(set(mapping) - {str(k) for k in range(16)})
+    if extra:
+        raise ValueError(f"pattern.tiles has unknown keys {extra}; valid keys are '0'..'15'")
+    tiles = {k: _pattern_tile(f"pattern.tiles[{k!r}]", v) for k, v in mapping.items()}
+    cell_set = set(cells)
+    out = []
+    for x, y in cells:
+        key = sum(bit for _, bit, (dx, dy) in _AUTOTILE_BITS if (x + dx, y + dy) in cell_set)
+        out.append(tiles[str(key)])
+    return out
+
+
+def fill_pattern(
+    object_name,
+    material_name,
+    pattern,
+    plane="XY",
+    plane_offset_m=0.0,
+    layer="BASE",
+    cell_min_xy=None,
+    cell_max_xy=None,
+    cells=None,
+):
+    """Fill cells with a deterministic pattern, applied through one :func:`place_tiles` call.
+
+    The fill set is exactly one of the inclusive rectangle ``cell_min_xy..cell_max_xy`` or the explicit
+    ``cells`` list of ``[x, y]``. Cells are visited row-major: ``y`` ascending outer, ``x`` ascending inner.
+    Anywhere a tile is accepted in ``pattern`` it may be a tile name, ``[column, row]`` or an object
+    ``{tile, rotation_deg, flip_x, flip_y}``. ``pattern["kind"]``:
+
+    ``"random"``: ``tiles`` (>= 1), optional ``weights`` (same length, all > 0), required int ``seed``. One
+    ``random.Random(seed)`` is created per call and ``rng.choices(tiles, weights)[0]`` is drawn once per cell
+    in visiting order, so the same inputs always give the same result.
+
+    ``"stamp"``: ``rows`` is a rectangular list of lists of tiles. The stamp tiles the fill set anchored at
+    its top-left: column ``(x - min_x) % w``, and ``rows[0]`` is the TOP row, i.e. the row with the highest
+    ``y`` (``rows[(max_y - y) % h]``), so the stamp reads on the plane as written.
+
+    ``"autotile"``: ``mask`` ``"edges4"`` and ``tiles`` mapping all of ``"0".."15"`` to tiles; the key is the
+    sum of N=1 (y+1), E=2 (x+1), S=4 (y-1), W=8 (x-1) for each 4-neighbour inside the fill set. The gen
+    server's Wang sheets publish no such key; the ``tiles`` map (names from the sidecar) supplies it.
+
+    Returns ``{built, remapped, face_count, cells, assignments}`` where ``assignments`` is a list of
+    ``{cell_xy, tile_xy}`` (the resolved tile; ``null`` with ``truncated: true`` above 500 cells).
+    """
+    fill_cells = _pattern_cells(cell_min_xy, cell_max_xy, cells)
+    _as_plane(plane)
+    _as_layer(layer)
+    entries = _pattern_assign(pattern, fill_cells)
+    tileset = _find_tileset(material_name)
+    placements = [
+        {
+            "cell_xy": cell,
+            "tile": entry["tile"],
+            "plane": plane,
+            "plane_offset_m": plane_offset_m,
+            "rotation_deg": entry["rotation_deg"],
+            "flip_x": entry["flip_x"],
+            "flip_y": entry["flip_y"],
+            "layer": layer,
+        }
+        for cell, entry in zip(fill_cells, entries)
+    ]
+    report = place_tiles(object_name, material_name, placements)
+    report["cells"] = len(fill_cells)
+    if len(fill_cells) > _PATTERN_ASSIGNMENT_LIMIT:
+        report["assignments"] = None
+        report["truncated"] = True
+    else:
+        report["assignments"] = [
+            {
+                "cell_xy": list(cell),
+                "tile_xy": list(_as_tile(tileset, "tile", entry["tile"], plane)),
+            }
+            for cell, entry in zip(fill_cells, entries)
+        ]
+    return report
+
+
 # ---------------------------------------------------------------------------
 # Removing and repainting
 # ---------------------------------------------------------------------------

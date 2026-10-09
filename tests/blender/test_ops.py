@@ -135,6 +135,29 @@ def test_create_tile_object_matches_api(tileset):
     assert bpy.data.objects[OPS_OBJECT_NAME].type == "MESH"
 
 
+def test_fill_pattern_matches_api(tileset):
+    _create_object_pair()
+    pattern = {"kind": "random", "tiles": [[0, 0], [1, 1], [2, 2]], "seed": 5}
+    report = ops.fill_pattern(
+        object_name=OPS_OBJECT_NAME,
+        tileset_name=TILESET_NAME,
+        pattern=pattern,
+        cell_min_xy=(0, 0),
+        cell_max_xy=(2, 2),
+    )
+    api_result = _api().fill_pattern(
+        object_name=API_OBJECT_NAME,
+        material_name=TILESET_NAME,
+        pattern=pattern,
+        cell_min_xy=[0, 0],
+        cell_max_xy=[2, 2],
+    )
+    assert report.face_count == api_result["face_count"] == 9
+    assert report.built == api_result["built"] and report.cells == api_result["cells"] == 9
+    assert list(report.assignments) == api_result["assignments"]
+    assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+
+
 def test_place_tiles_matches_api(tileset):
     _create_object_pair()
     report = ops.place_tiles(

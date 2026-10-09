@@ -46,6 +46,7 @@ __all__ = [
     "create_tile_object",
     "place_tiles",
     "fill_tiles",
+    "fill_pattern",
     "remove_tiles",
     "paint_faces",
     "tile_object_report",
@@ -110,6 +111,18 @@ class TileEditReport:
     remapped: int = 0
     removed: int = 0
     painted: int = 0
+
+
+@dataclass(frozen=True)
+class PatternFillReport:
+    """What a pattern fill changed: the edit counters, the cells filled and, up to 500 cells, each cell's tile."""
+
+    face_count: int = 0
+    built: int = 0
+    remapped: int = 0
+    cells: int = 0
+    assignments: tuple[dict, ...] | None = None
+    truncated: bool = False
 
 
 @dataclass(frozen=True)
@@ -415,6 +428,40 @@ def fill_tiles(
         flip_y=flip_y,
     )
     return _edit_report(result)
+
+
+def fill_pattern(
+    object_name: str,
+    tileset_name: str,
+    pattern: dict,
+    plane: Literal["XY", "XZ", "YZ"] = "XY",
+    plane_offset_m: float = 0.0,
+    layer: Literal["BASE", "DECAL"] = "BASE",
+    cell_min_xy: tuple[int, int] | None = None,
+    cell_max_xy: tuple[int, int] | None = None,
+    cells: list[tuple[int, int]] | None = None,
+) -> PatternFillReport:
+    """Fill cells with a deterministic pattern: kind random (tiles, weights, seed), stamp (rows; rows[0] is the top row) or autotile (mask edges4, tiles keyed "0".."15"; N=1 E=2 S=4 W=8). Give cell_min_xy+cell_max_xy or cells."""
+    result = _addon_api().fill_pattern(
+        object_name=object_name,
+        material_name=tileset_name,
+        pattern=pattern,
+        plane=plane,
+        plane_offset_m=plane_offset_m,
+        layer=layer,
+        cell_min_xy=cell_min_xy,
+        cell_max_xy=cell_max_xy,
+        cells=None if cells is None else [list(cell) for cell in cells],
+    )
+    assignments = result.get("assignments")
+    return PatternFillReport(
+        face_count=int(result["face_count"]),
+        built=int(result["built"]),
+        remapped=int(result["remapped"]),
+        cells=int(result["cells"]),
+        assignments=None if assignments is None else tuple(assignments),
+        truncated=bool(result.get("truncated", False)),
+    )
 
 
 def remove_tiles(
