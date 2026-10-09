@@ -241,6 +241,10 @@ def test_create_overlay_object_matches_api(tileset):
     assert via_ops == _geometry(API_OBJECT_NAME + "_ov")
     assert {face[1][0][0][2] for face in via_ops} == {0.004}
     assert bpy.data.objects[report.object_name].parent.name == OPS_OBJECT_NAME
+    reading = ops.tile_object_report(report.object_name)
+    api_reading = _api().describe_tile_object(API_OBJECT_NAME + "_ov")
+    assert reading.overlay_of == OPS_OBJECT_NAME and api_reading["overlay_of"] == API_OBJECT_NAME
+    assert ops.tile_object_report(OPS_OBJECT_NAME).overlay_of is None
 
 
 def test_fill_remove_paint_and_report_match_api(tileset):

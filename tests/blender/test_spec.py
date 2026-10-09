@@ -190,7 +190,7 @@ def test_export_reports_faces_it_cannot_rebuild(workdir):
 
 
 def test_export_errors(workdir):
-    with pytest.raises(ValueError, match="object_names is empty"):
+    with pytest.raises(ValueError, match=r"object_names \(op: objects\) is empty"):
         api.export_spec([], str(workdir / "x.yaml"))
     with pytest.raises(ValueError, match="spec_path must be absolute"):
         api.export_spec([ROOM], "x.yaml")

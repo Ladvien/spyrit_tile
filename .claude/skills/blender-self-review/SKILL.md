@@ -39,7 +39,7 @@ blended: `/Users/ladvien/blended`. Blender: `/Applications/Blender.app/Contents/
 
 | # | Gate | Command (in `~/spyrit_tile`) | Proves | Needs |
 |---|---|---|---|---|
-| 1 | static | `uvx pyflakes addon/spyrite_tile packages scripts \| grep ': undefined name'` (Blender's `prop : EnumProperty(...)` annotations make pyflakes print hundreds of 'forward annotation' errors; only undefined names matter; baseline: 2 lines, `HIDDEN` at sprytile_utils.py:1024,1073, from a star import) | no undefined names | nothing |
+| 1 | static | `uvx pyflakes addon/spyrite_tile packages scripts \| grep ': undefined name'` (Blender's `prop : EnumProperty(...)` annotations make pyflakes print hundreds of 'forward annotation' errors; only undefined names matter; baseline: exactly 2 lines, both `undefined name 'HIDDEN'` in `sprytile_utils.py`, from a star import; any other line is yours) | no undefined names | nothing |
 | 2 | pure | `make test-pure` | generator, normalize, backends (mocked HTTP) | `.venv` |
 | 3 | headless Blender | `make blender-test-deps` once, then `make test-blender` | API numbers (`test_api.py`), ops vs api (`test_ops.py`), relations (`test_metamorphic.py`), registration | nothing (isolated) |
 | 4 | live MCP | `make test-live` (`ARGS=--reload-api` after `api.py` edits) | the agent path in the user's open Blender: MCP -> blended -> plugin -> api | user's Blender running with mcp add-on |
@@ -67,9 +67,14 @@ Which gates for which change:
 - `run_python` output is truncated ("[N earlier characters dropped]"): write large JSON to a
   file under `/tmp` from inside Blender and read it on the host (Blender is on this machine).
 - Code reload: blended + `spyrite_tile_ops` re-import automatically on source change. The add-on
-  does not: `api.py` can be reloaded (`importlib.reload(sys.modules['bl_ext.user_default.spyrite_tile.api'])`,
-  what `--reload-api` does). Class/property/keymap/gui changes need a Blender restart: ask the
+  does not: call the `reload_core` op (or `api.reload_core()`; `make test-live ARGS=--reload-api` does the
+  same), which re-executes `sprytile_core`, `sprytile_uv`, `sprytile_builder`, `spyrite_spec`,
+  `spyrite_probe` and `api` in that order. Reloading `api` alone leaves the others stale. Class/property/
+  keymap/gui changes (`sprytile_utils`, `sprytile_modal`, `__init__`, ...) need a Blender restart: ask the
   user to restart (one sentence), do not try to hot-reload registered classes.
+- Pixel check and undo from inside Blender: `verify_tile_object(object_name, view)` is the in-Blender
+  counterpart of gate 5 (Workbench render, per-face quadrant comparison); `checkpoint` / `rollback` /
+  `discard_checkpoint` snapshot and restore tile objects around risky multi-step edits.
 - Useful MCP tools: `get_screenshot_of_area_as_image {area_ui_type:'VIEW_3D'}`,
   `get_screenshot_of_window_as_image`, `get_screenshot_of_window_as_json` (layout, active
   object, selection), `get_objects_summary`, `get_object_detail_summary`,
