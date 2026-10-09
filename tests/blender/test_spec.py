@@ -153,7 +153,7 @@ def test_round_trip_reproduces_the_scene(workdir):
     report = api.export_spec([ROOM, YARD], str(exported))
     assert report == {"spec_path": str(exported), "objects": 2, "tiles": 9, "unexported_faces": {}}
     text = exported.read_text(encoding="utf-8")
-    assert "image: ../tiles.png" in text or str(workdir / "tiles.png") in text
+    assert spyrite_spec.load_spec(text)["tilesets"][TERRAIN]["image"] == str(workdir / "tiles.png")
     spec = spyrite_spec.validate_spec(spyrite_spec.load_spec(text))
     decal = [t for t in spec["objects"][ROOM]["tiles"] if t["layer"] == "DECAL"]
     assert len(decal) == 1 and decal[0]["plane_offset_m"] == 0.0 and decal[0]["tile"] == "water"
@@ -244,3 +244,117 @@ def test_failed_placement_rolls_the_object_back(workdir):
     with pytest.raises(RuntimeError, match="DECAL needs a BASE tile"):
         api.build_spec(_write(workdir, broken.replace(f"  {ROOM}:\n", f"  {ROOM}:\n    clear: true\n"), "broken.yaml"))
     assert _signature(ROOM) == before
+
+
+def _state(object_name):
+    obj = bpy.data.objects[object_name]
+    return (
+        obj.get(api.PIXELS_PER_UNIT_PROP),
+        obj.sprytile_gridid,
+        [slot.material.name for slot in obj.material_slots],
+        _signature(object_name),
+    )
+
+
+def test_failed_build_restores_object_properties(workdir):
+    api.build_spec(_write(workdir, TWO_OBJECTS))
+    before = _state(YARD)
+    # YARD is rebuilt at 8 ppu instead of 32, then an unbuildable DECAL (no BASE at [9, 9]) fails it
+    broken = TWO_OBJECTS.replace("pixels_per_unit: 32", "pixels_per_unit: 8").replace(
+        "      - {cell: [4, 4], tile: [3, 3], tile_span: [1, 1]}", "      - {cell: [9, 9], tile: [3, 3], layer: DECAL}"
+    )
+    with pytest.raises(RuntimeError, match=rf"^objects\.{YARD}\.tiles\[0\]: could not place tile"):
+        api.build_spec(_write(workdir, broken, "broken.yaml"))
+    assert _state(YARD) == before
+
+
+def test_failed_build_removes_a_new_object(workdir):
+    broken = TWO_OBJECTS.replace("cell: [0, 0], tile: water", "cell: [9, 9], tile: water")
+    with pytest.raises(RuntimeError, match=rf"^objects\.{ROOM}\.tiles\[1\]: could not place tile"):
+        api.build_spec(_write(workdir, broken))
+    assert bpy.data.objects.get(ROOM) is None and bpy.data.meshes.get(ROOM) is None
+
+
+def test_build_failure_names_the_spec_entry(workdir):
+    text = TWO_OBJECTS.replace(
+        f"      - {{cell: [4, 4], tile: [3, 3], tile_span: [1, 1]}}",
+        "      - {cell: [4, 4], tile: [3, 3], layer: DECAL}",
+    )
+    with pytest.raises(RuntimeError, match=rf"^objects\.{YARD}\.tiles\[0\]: could not place tile at cell \(4, 4\)"):
+        api.build_spec(_write(workdir, text))
+
+
+def test_export_of_repeated_names_counts_once(workdir):
+    api.build_spec(_write(workdir, TWO_OBJECTS))
+    report = api.export_spec([ROOM, ROOM], str(workdir / "dup.spyrite.yaml"))
+    assert report["objects"] == 1 and report["tiles"] == 8
+    spec = spyrite_spec.load_spec((workdir / "dup.spyrite.yaml").read_text(encoding="utf-8"))
+    assert len(spec["objects"][ROOM]["tiles"]) == 8
+
+
+def test_export_undoes_the_overlay_lift(workdir):
+    api.build_spec(_write(workdir, TWO_OBJECTS))
+    overlay = PREFIX + "overlay"
+    api.create_overlay_object(overlay, ROOM, TERRAIN, lift_m=0.25)
+    api.place_tiles(overlay, TERRAIN, [{"cell_xy": (0, 0), "tile": "stone", "plane": "XZ", "plane_offset_m": 2}])
+    raw = api.describe_tile_object(overlay)["faces"][0]["plane_offset_m"]
+    assert raw == pytest.approx(1.75)
+    report = api.export_spec([overlay], str(workdir / "ov.spyrite.yaml"))
+    assert report["tiles"] == 1
+    spec = spyrite_spec.load_spec((workdir / "ov.spyrite.yaml").read_text(encoding="utf-8"))
+    assert spec["objects"][overlay]["tiles"][0]["plane_offset_m"] == 2.0
+    # Rebuilding into the same scene re-applies the lift once: same face, no duplicate
+    result = api.build_spec(str(workdir / "ov.spyrite.yaml"))
+    assert result["objects"][0]["built"] == 0 and result["objects"][0]["remapped"] == 1
+    assert [f["plane_offset_m"] for f in api.describe_tile_object(overlay)["faces"]] == [pytest.approx(1.75)]
+
+
+ROUND_TRIP = f"""\
+spyrite_spec: 1
+tilesets:
+  {TERRAIN}:
+    image: ./tiles.png
+    tile_size_px: [16, 16]
+  {PREFIX}props:
+    image: ./props.png
+    tile_size_px: [16, 16]
+objects:
+  {ROOM}:
+    tileset: {TERRAIN}
+    pixels_per_unit: 16
+    tiles:
+      - {{plane: XZ, plane_offset_m: 3, cell: [0, 0], tile: wall_top, tile_span: [2, 1]}}
+      - {{plane: XZ, plane_offset_m: 3, cell: [0, 0], tile: [1, 1], layer: DECAL, rotation_deg: 90}}
+      - {{plane: YZ, plane_offset_m: 1, cell: [2, 0], tile: wall_top, flip_x: true}}
+      - {{plane: XY, cell: [0, 0], tile: [0, 2], tile_span: [2, 1], rotation_deg: 180}}
+  {YARD}:
+    tileset: {PREFIX}props
+    pixels_per_unit: 16
+    tiles:
+      - {{cell: [1, 1], tile: [3, 0], tile_span: [1, 2]}}
+      - {{plane: XZ, plane_offset_m: 0, cell: [1, 1], tile: [2, 2], layer: DECAL}}
+"""
+
+
+def test_round_trip_keeps_spans_wall_decals_and_several_tilesets(workdir):
+    shutil.copy(FIXTURES / "tiles_oriented_16px.png", workdir / "props.png")
+    # A decal needs a BASE face in its cell: give YARD one on the wall plane first
+    text = ROUND_TRIP.replace(
+        f"      - {{plane: XZ, plane_offset_m: 0, cell: [1, 1], tile: [2, 2], layer: DECAL}}",
+        f"      - {{plane: XZ, plane_offset_m: 0, cell: [1, 1], tile: [0, 0]}}\n"
+        f"      - {{plane: XZ, plane_offset_m: 0, cell: [1, 1], tile: [2, 2], layer: DECAL}}",
+    )
+    api.build_spec(_write(workdir, text))
+    expected = {name: _signature(name) for name in (ROOM, YARD)}
+    assert any(sig[4] == (2, 1) for sig in expected[ROOM]) and any(sig[4] == (1, 2) for sig in expected[YARD])
+    assert any(sig[0] == "XZ" and sig[8] == "DECAL" and sig[1] == pytest.approx(2.998) for sig in expected[ROOM])
+    exported = workdir / "rt.spyrite.yaml"
+    report = api.export_spec([ROOM, YARD], str(exported))
+    assert report["unexported_faces"] == {}
+    spec = spyrite_spec.load_spec(exported.read_text(encoding="utf-8"))
+    assert set(spec["tilesets"]) == {TERRAIN, PREFIX + "props"}
+    assert {t["plane_offset_m"] for t in spec["objects"][ROOM]["tiles"] if t["layer"] == "DECAL"} == {3.0}
+
+    _remove_test_data()
+    api.build_spec(str(exported))
+    assert {name: _signature(name) for name in (ROOM, YARD)} == expected
