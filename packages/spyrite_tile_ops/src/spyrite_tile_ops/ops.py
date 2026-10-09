@@ -37,7 +37,7 @@ ADDON_MODULE_NAME = "spyrite_tile"
 ADDON_API_MODULE_NAME = "api"
 ADDON_NOT_ENABLED_MESSAGE = (
     "The Spyrite Tile add-on is not enabled in this Blender; run "
-    "`make install-addon` in /Users/ladvien/spyrite_tile and restart Blender."
+    "`make install-addon` in /Users/ladvien/spyrit_tile and restart Blender."
 )
 ALLOWED_ROTATIONS_DEG = (0, 90, 180, 270)
 

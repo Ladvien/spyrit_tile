@@ -3,8 +3,8 @@ Description=Spyrite Tile local SDXL pixel-art service
 After=network-online.target
 
 [Service]
-ExecStart=/home/ladvien/spyrite_tile/services/pixel_server/.venv/bin/uvicorn pixel_server.app:app --host 0.0.0.0 --port 8190
-WorkingDirectory=/home/ladvien/spyrite_tile/services/pixel_server
+ExecStart=/home/ladvien/spyrit_tile/services/pixel_server/.venv/bin/uvicorn pixel_server.app:app --host 0.0.0.0 --port 8190
+WorkingDirectory=/home/ladvien/spyrit_tile/services/pixel_server
 Environment=PATH=/home/ladvien/.local/bin:/usr/local/bin:/usr/bin:/bin
 Restart=on-failure
 RestartSec=10

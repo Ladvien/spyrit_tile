@@ -14,11 +14,11 @@
     },
     "spyrite-tile-gen": {
       "type": "stdio",
-      "command": "/Users/ladvien/spyrite_tile/.venv/bin/spyrite-tile-gen",
+      "command": "/Users/ladvien/spyrit_tile/.venv/bin/spyrite-tile-gen",
       "args": [],
       "env": {
         "RD_API_KEY": "${RD_API_KEY}",
-        "SPYRITE_OUTPUT_DIR": "/Users/ladvien/spyrite_tile/outputs/generated",
+        "SPYRITE_OUTPUT_DIR": "/Users/ladvien/spyrit_tile/outputs/generated",
         "SPYRITE_LOCAL_URL": "http://192.168.1.110:8190"
       }
     }
