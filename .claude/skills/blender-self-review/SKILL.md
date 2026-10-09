@@ -20,6 +20,9 @@ blended: `/Users/ladvien/blended`. Blender: `/Applications/Blender.app/Contents/
    projection, a second run under a known transformation, a saved-and-reloaded copy.
 2. **The probe must vary.** One colour / one value everywhere cannot tell right from constant.
    Use the 16-distinct-tile fixture `tests/fixtures/tiles_16px.png`; refuse uniform probes.
+   Solid tiles cannot see orientation: use `tests/fixtures/tiles_oriented_16px.png` (4 distinct
+   quadrants per tile, all 8 orientations differ) for anything touching rotation/flip/UV layout.
+   Found this way: flip_x/flip_y were swapped at 90/270 degrees; every solid-colour check passed.
 3. **Every new check gets a negative control.** Break the thing on purpose (mutant or corrupted
    data), watch the check fail *on the right item*, restore, watch it pass. A check never seen
    failing is unproven. Confirm the mutant actually changed behaviour (see §6).
@@ -103,7 +106,7 @@ Perspective framing for humans: Euler (60, 0, 30) degrees, distance 1.6 x diagon
 Expected colour = mean of the inner half of the tile in the image; observed = mean of the inner
 half of the face's screen box (orientation independent). Prints `VISUAL_PROBE_OK measured=..
 tiles=.. max_delta=..` or `VISUAL_PROBE_FAILED` with the worst face. Evidence: `screenshot.png`,
-`annotated.png` (green ok / red mismatch), `zoom_*.png`, `faces.json`. Measured baseline on the
+`annotated.png` (green ok / red mismatch); pass `--placements <json>` to also judge rotation/flips per face (quadrant compare; `make test-live` writes `outputs/live_smoke/placements_<plane>.json`), `zoom_*.png`, `faces.json`. Measured baseline on the
 fixture: max_delta 1.0.
 
 Failure reading: many faces red with one shared wrong colour -> occlusion or wrong shading;
