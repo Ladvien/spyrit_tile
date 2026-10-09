@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "spyrite_tile"
-version = "0.6.14"
+version = "0.6.15"
 name = "Spyrite Tile"
 tagline = "Build tile-based low-poly pixel-art scenes by hand or by agent"
 maintainer = "Thomas Brittain (ladvien)"
