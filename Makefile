@@ -2,7 +2,7 @@ BLENDER ?= /Applications/Blender.app/Contents/MacOS/Blender
 ADDON_DIR ?= addon/spyrite_tile
 ADDON_ABS := $(abspath $(ADDON_DIR))
 
-.PHONY: test-live install-addon install-blended-plugin blender-test-deps test-pure test-blender
+.PHONY: test-live test-visual install-addon install-blended-plugin blender-test-deps test-pure test-blender
 
 # Link the add-on (extension id `spyrite_tile`) into the user's Blender and
 # enable it. A symlink, so the repo is what Blender loads; restart Blender
@@ -47,3 +47,11 @@ test-blender:
 # ARGS=--reload-api picks up add-on api.py edits without restarting Blender.
 test-live:
 	/Users/ladvien/blended/.venv/bin/python scripts/mcp_live_smoke.py $(ARGS)
+
+# Pixel oracle on the open Blender (run after test-live, which builds the objects): every
+# visible tile face's on-screen colour must match its tile in the tileset image. Evidence
+# (screenshot, annotated boxes, zoom crops, faces.json) lands in outputs/visual_probe/.
+PROBE = .venv/bin/python scripts/visual_probe.py --tileset tests/fixtures/tiles_16px.png --tile-size 16
+test-visual:
+	$(PROBE) --object spyrite_probe_board --view top --min-faces 16 --out outputs/visual_probe/board_top
+	$(PROBE) --object spyrite_smoke_room --view front --min-faces 18 --allow-uniform --out outputs/visual_probe/room_front
