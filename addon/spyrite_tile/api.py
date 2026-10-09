@@ -118,6 +118,7 @@ Composite builders
 """
 
 import array
+import importlib
 import math
 import numbers
 import os
@@ -131,7 +132,7 @@ from mathutils import Matrix, Vector
 
 from . import spyrite_probe
 from . import spyrite_spec
-from . import sprytile_utils
+from . import sprytile_core
 from . import sprytile_uv
 from .sprytile_builder import TileBuilder
 from .sprytile_uv import UvDataLayers
@@ -150,7 +151,47 @@ __all__ = [
     "describe_scene",
     "set_pixel_art_view",
     "verify_tile_object",
+    "reload_core",
 ]
+
+# Modules reload_core re-executes, in dependency order (api last).
+RELOADABLE_MODULES = (
+    "sprytile_core",
+    "sprytile_uv",
+    "sprytile_builder",
+    "spyrite_spec",
+    "spyrite_probe",
+    "api",
+)
+
+
+def reload_core():
+    """Reload the add-on modules that register no Blender classes, without a restart.
+
+    Reloads ``sprytile_core, sprytile_uv, sprytile_builder, spyrite_spec,
+    spyrite_probe, api`` in that order (a module not yet imported, because this
+    Blender predates it, is imported instead). Edits to the operator modules
+    (``sprytile_utils``, ``sprytile_modal``, ...) still need a restart: their
+    classes are registered with Blender.
+
+    ``sprytile_core._removed_tilesets`` is session state and is reset by the
+    reload: tilesets removed with the grid "-" button are listed again by the
+    next validate_grids. Call this function through ``api`` only (modules held
+    from before the reload keep the old code for names rebound by ``import``).
+
+    Returns ``{"reloaded": [module names]}``.
+    """
+    import sys
+
+    done = []
+    for name in RELOADABLE_MODULES:
+        full = f"{__package__}.{name}"
+        if full in sys.modules:
+            importlib.reload(sys.modules[full])
+        else:
+            importlib.import_module(full)
+        done.append(name)
+    return {"reloaded": done}
 
 PLANES = {
     "XY": {"right": (1.0, 0.0, 0.0), "up": (0.0, 1.0, 0.0), "normal": (0.0, 0.0, 1.0), "axis": 2},
@@ -386,10 +427,10 @@ def _find_tileset(material_name):
     material = bpy.data.materials.get(material_name)
     if material is None:
         raise ValueError(f"No material named {material_name!r}; call create_tileset first")
-    mat_data = sprytile_utils.get_mat_data(bpy.context, material.name)
+    mat_data = sprytile_core.get_mat_data(bpy.context, material.name)
     if mat_data is None or len(mat_data.grids) == 0:
         raise ValueError(f"Material {material_name!r} is not a tileset; call create_tileset first")
-    image = sprytile_utils.get_material_texture(material)
+    image = sprytile_core.get_material_texture(material)
     if image is None:
         raise ValueError(f"Tileset {material_name!r} has no image texture")
     return _Tileset(material, mat_data, mat_data.grids[0], image)
@@ -407,9 +448,9 @@ def _find_tileset_for_image(abs_path, tile_size_px, padding_px, margin_px):
         material = bpy.data.materials.get(mat_data.mat_id)
         if material is None or len(mat_data.grids) == 0:
             continue
-        if material.session_uid in sprytile_utils._removed_tilesets:
+        if material.session_uid in sprytile_core._removed_tilesets:
             continue
-        image = sprytile_utils.get_material_texture(material)
+        image = sprytile_core.get_material_texture(material)
         if image is None or os.path.realpath(bpy.path.abspath(image.filepath)) != wanted:
             continue
         grid = mat_data.grids[0]
@@ -442,7 +483,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
     margin = _as_int_tuple("margin_px", margin_px, 4, minimum=0)
 
     scene = bpy.context.scene
-    sprytile_utils.ensure_scene_setup(scene)
+    sprytile_core.ensure_scene_setup(scene)
 
     already_loaded = set(bpy.data.images.keys())
     image = bpy.data.images.load(image_path, check_existing=True)
@@ -484,11 +525,11 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
             }
         material = bpy.data.materials.new(material_name)
     material.use_fake_user = True
-    sprytile_utils.restore_removed_tileset(material)
-    sprytile_utils.setup_tile_material(material, image)
-    sprytile_utils.validate_grids(scene)
+    sprytile_core.restore_removed_tileset(material)
+    sprytile_core.setup_tile_material(material, image)
+    sprytile_core.validate_grids(scene)
 
-    mat_data = sprytile_utils.get_mat_data(bpy.context, material.name)
+    mat_data = sprytile_core.get_mat_data(bpy.context, material.name)
     if mat_data is None or len(mat_data.grids) == 0:
         raise RuntimeError(f"Sprytile did not register a grid for material {material.name!r}")
     grid = mat_data.grids[0]
@@ -528,7 +569,7 @@ def create_tile_object(object_name, material_name, pixels_per_unit):
     _as_name("object_name", object_name)
     ppu = _as_pixels_per_unit(pixels_per_unit)
     scene = bpy.context.scene
-    sprytile_utils.ensure_scene_setup(scene)
+    sprytile_core.ensure_scene_setup(scene)
     tileset = _find_tileset(material_name)
 
     obj = bpy.data.objects.get(object_name)
@@ -754,7 +795,7 @@ def _apply_placements(obj, tileset, placements, clear=False, outcomes=None):
                 uv_right,
                 normal,
                 require_base_layer=decal,
-                work_layer_mask=sprytile_utils.get_work_layer_data(data),
+                work_layer_mask=sprytile_core.get_work_layer_data(data),
                 grid_origin=grid_origin,
             )
             faces_after = len(builder.bmesh.faces)
@@ -796,7 +837,7 @@ def place_tiles(object_name, material_name, placements):
     if not placements:
         raise ValueError("placements is empty")
     normalized = [_normalize_placement(i, p, tileset) for i, p in enumerate(placements)]
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
     return _apply_placements(obj, tileset, normalized)
 
 
@@ -1030,7 +1071,7 @@ def fill_pattern(
 
 
 def _object_grid(obj):
-    grid = sprytile_utils.get_grid(bpy.context, obj.sprytile_gridid)
+    grid = sprytile_core.get_grid(bpy.context, obj.sprytile_gridid)
     if grid is None:
         raise ValueError(f"Object {obj.name!r} has no tileset grid (sprytile_gridid {obj.sprytile_gridid}); "
                          "create it with create_tile_object")
@@ -1052,7 +1093,7 @@ def remove_tiles(object_name, plane, plane_offset_m, cells):
     cell_set = {_as_int_tuple(f"cells[{i}]", cell, 2) for i, cell in enumerate(cells)}
     if not cell_set:
         raise ValueError("cells is empty")
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
     grid = _object_grid(obj)
     ppu = _object_pixels_per_unit(obj, bpy.context.scene)
     plane_def = PLANES[plane_name]
@@ -1120,7 +1161,7 @@ def paint_faces(object_name, material_name, face_indices, tile_xy, rotation_deg=
     rotation = _as_rotation(rotation_deg)
     flip_x = _as_bool("flip_x", flip_x)
     flip_y = _as_bool("flip_y", flip_y)
-    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    sprytile_core.ensure_scene_setup(bpy.context.scene)
 
     scene = bpy.context.scene
     ppu = _object_pixels_per_unit(obj, scene)
@@ -1508,10 +1549,10 @@ def move_faces(object_name, face_indices, delta_px):
 def _cached_tileset(obj, grid_id, tileset_cache):
     """The _Tileset of a grid id (cached per call), or None when the grid or its image is gone."""
     if grid_id not in tileset_cache:
-        grid = sprytile_utils.get_grid(bpy.context, grid_id)
-        image = sprytile_utils.get_grid_texture(obj, grid) if grid is not None else None
-        material = sprytile_utils.get_grid_material(grid) if image is not None else None
-        mat_data = sprytile_utils.get_mat_data(bpy.context, material.name) if material is not None else None
+        grid = sprytile_core.get_grid(bpy.context, grid_id)
+        image = sprytile_core.get_grid_texture(obj, grid) if grid is not None else None
+        material = sprytile_core.get_grid_material(grid) if image is not None else None
+        mat_data = sprytile_core.get_mat_data(bpy.context, material.name) if material is not None else None
         if grid is None or image is None or material is None or mat_data is None:
             tileset_cache[grid_id] = None
         else:
@@ -1545,7 +1586,7 @@ def _decode_orientation(paint_settings):
     """(rotation_deg, flip_x, flip_y) of a face's ``paint_settings`` bitmask; inverse of ``_sprytile_flips``.
 
     Bits 10-11 hold the turn (0, 3, 2, 1 for 0, 90, 180, 270 degrees), bit 9 Sprytile's ``uv_flip_x`` and
-    bit 8 ``uv_flip_y`` (``sprytile_utils.get_paint_settings``). Sprytile mirrors before turning, so for a
+    bit 8 ``uv_flip_y`` (``sprytile_core.get_paint_settings``). Sprytile mirrors before turning, so for a
     quarter turn the two flags trade places back to the documented mirror-as-seen flips.
     """
     rotation = {0: 0, 3: 90, 2: 180, 1: 270}[(paint_settings >> 10) & 3]
@@ -1900,14 +1941,14 @@ def describe_scene():
     """
     context = bpy.context
     scene = context.scene
-    sprytile_utils.ensure_scene_setup(scene)
+    sprytile_core.ensure_scene_setup(scene)
 
     tilesets = []
     for mat_data in scene.sprytile_mats:
         material = bpy.data.materials.get(mat_data.mat_id)
         if material is None or len(mat_data.grids) == 0:
             continue
-        image = sprytile_utils.get_material_texture(material)
+        image = sprytile_core.get_material_texture(material)
         if image is None:
             continue
         tileset = _Tileset(material, mat_data, mat_data.grids[0], image)
@@ -1932,8 +1973,8 @@ def describe_scene():
     for obj in context.view_layer.objects:
         if obj.type != "MESH" or obj.sprytile_gridid == -1:
             continue
-        grid = sprytile_utils.get_grid(context, obj.sprytile_gridid)
-        material = sprytile_utils.get_grid_material(grid) if grid is not None else None
+        grid = sprytile_core.get_grid(context, obj.sprytile_gridid)
+        material = sprytile_core.get_grid_material(grid) if grid is not None else None
         tile_objects.append(
             {
                 "object_name": obj.name,
@@ -1949,7 +1990,7 @@ def describe_scene():
     removed = [
         material.name
         for material in bpy.data.materials
-        if material.session_uid in sprytile_utils._removed_tilesets
+        if material.session_uid in sprytile_core._removed_tilesets
     ]
     data = scene.sprytile_data
     return {

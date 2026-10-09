@@ -3,7 +3,7 @@ import math
 import bmesh
 from mathutils import Vector, Matrix
 
-from . import sprytile_utils
+from . import sprytile_core
 
 
 class UvDataLayers:
@@ -256,14 +256,14 @@ def uv_map_face(context, up_vector, right_vector, tile_xy, origin_xy, face_index
     data = scene.sprytile_data
 
     grid_id = obj.sprytile_gridid
-    target_grid = sprytile_utils.get_grid(context, grid_id)
+    target_grid = sprytile_core.get_grid(context, grid_id)
 
     uv_layer = mesh.loops.layers.uv.verify()
 
     if face_index >= len(mesh.faces):
         return None, None
 
-    target_img = sprytile_utils.get_grid_texture(obj, target_grid)
+    target_img = sprytile_core.get_grid_texture(obj, target_grid)
     if target_img is None:
         return None, None
 
@@ -338,8 +338,8 @@ def apply_uvs(context, face, uv_verts, target_grid,
     if origin_xy is not None:
         origin_id = (origin_xy[1] * row_size) + origin_xy[0]
 
-    paint_settings = sprytile_utils.get_paint_settings(data)
-    work_layer_data = sprytile_utils.get_work_layer_data(data)
+    paint_settings = sprytile_core.get_paint_settings(data)
+    work_layer_data = sprytile_core.get_work_layer_data(data)
 
     sel_width = target_grid.tile_selection[2]
     sel_height = target_grid.tile_selection[3]

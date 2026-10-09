@@ -4,7 +4,7 @@ from mathutils import Vector, Quaternion
 from mathutils.geometry import distance_point_to_plane
 
 from .. import sprytile_modal
-from .. import sprytile_utils
+from .. import sprytile_core
 from .. import sprytile_uv
 from .. import sprytile_preview
 from .. import sprytile_builder
@@ -50,11 +50,11 @@ class ToolBuild:
 
     def execute(self, context, scene, ray_origin, ray_vector, is_start):
         data = scene.sprytile_data
-        grid = sprytile_utils.get_grid(context, context.object.sprytile_gridid)
+        grid = sprytile_core.get_grid(context, context.object.sprytile_gridid)
         tile_xy = (grid.tile_selection[0], grid.tile_selection[1])
 
         # Get vectors for grid, without rotation
-        up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(
+        up_vector, right_vector, plane_normal = sprytile_core.get_current_grid_vectors(
             scene,
             with_rotation=False
         )
@@ -77,7 +77,7 @@ class ToolBuild:
         right_vector = rotation @ right_vector
 
         # raycast grid to get the grid position under the mouse
-        grid_coord, grid_right, grid_up, plane_pos = sprytile_utils.raycast_grid(
+        grid_coord, grid_right, grid_up, plane_pos = sprytile_core.raycast_grid(
             scene, context,
             up_vector, right_vector, plane_normal,
             ray_origin, ray_vector,
@@ -122,15 +122,15 @@ class ToolBuild:
                               self.start_coord[1] + (coord_frac[1] * grid.tile_selection[3]))
 
         # Get the area to build
-        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_utils.get_grid_area(
+        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_core.get_grid_area(
             grid.tile_selection[2],
             grid.tile_selection[3],
             data.uv_flip_x, data.uv_flip_y
         )
 
         # Check if joining multi tile faces
-        grid_no_spacing = sprytile_utils.grid_no_spacing(grid)
-        is_single_pixel = sprytile_utils.grid_is_single_pixel(grid)
+        grid_no_spacing = sprytile_core.grid_no_spacing(grid)
+        is_single_pixel = sprytile_core.grid_is_single_pixel(grid)
         do_join = is_single_pixel
         if do_join is False:
             do_join = grid_no_spacing and data.auto_join
@@ -145,7 +145,7 @@ class ToolBuild:
         require_base_layer = data.work_layer != 'BASE'
 
         # Get the work layer filter, based on layer settings
-        work_layer_mask = sprytile_utils.get_work_layer_data(data)
+        work_layer_mask = sprytile_core.get_work_layer_data(data)
 
         # Build mode with join multi
         if do_join:
@@ -230,7 +230,7 @@ class ToolBuild:
         data = scene.sprytile_data
 
         grid_id = obj.sprytile_gridid
-        target_grid = sprytile_utils.get_grid(context, grid_id)
+        target_grid = sprytile_core.get_grid(context, grid_id)
 
         if target_grid is None:
             return
@@ -238,13 +238,13 @@ class ToolBuild:
         # Reset can build flag
         ToolBuild.can_build = False
             
-        target_img = sprytile_utils.get_grid_texture(obj, target_grid)
+        target_img = sprytile_core.get_grid_texture(obj, target_grid)
         if target_img is None:
             sprytile_preview.clear_preview_data()
             return
 
         # If building on base layer, get from current virtual grid
-        up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene, False)
+        up_vector, right_vector, plane_normal = sprytile_core.get_current_grid_vectors(scene, False)
         # Building on decal layer, get from face under mouse
         if data.work_layer == 'DECAL_1' and data.lock_normal is False:
             location, hit_normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object,
@@ -280,7 +280,7 @@ class ToolBuild:
         right_vector = rotation @ right_vector
 
         # Raycast to the virtual grid
-        face_position, x_vector, y_vector, plane_cursor = sprytile_utils.raycast_grid(
+        face_position, x_vector, y_vector, plane_cursor = sprytile_core.raycast_grid(
             scene, context,
             up_vector, right_vector, plane_normal,
             ray_origin, ray_vector
@@ -293,13 +293,13 @@ class ToolBuild:
         # Passed can build checks, set flag to true
         ToolBuild.can_build = True
 
-        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_utils.get_grid_area(
+        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_core.get_grid_area(
                                                                     target_grid.tile_selection[2],
                                                                     target_grid.tile_selection[3],
                                                                     data.uv_flip_x,
                                                                     data.uv_flip_y)
 
-        grid_no_spacing = sprytile_utils.grid_no_spacing(target_grid)
+        grid_no_spacing = sprytile_core.grid_no_spacing(target_grid)
         # No spacing in grid, automatically join the preview together
         if grid_no_spacing:
             origin_coord = face_position + coord_min[0] * x_vector + coord_min[1] * y_vector
@@ -313,7 +313,7 @@ class ToolBuild:
             x_vector *= size_x / target_grid.grid[0]
             y_vector *= size_y / target_grid.grid[1]
 
-            preview_verts = sprytile_utils.get_build_vertices(origin_coord,
+            preview_verts = sprytile_core.get_build_vertices(origin_coord,
                                                           x_vector, y_vector,
                                                           up_vector, right_vector)
             vtx_center = Vector((0, 0, 0))
@@ -342,7 +342,7 @@ class ToolBuild:
             y_offset = y_vector * grid_offset[1]
 
             coord_position = face_position + x_offset + y_offset
-            coord_verts = sprytile_utils.get_build_vertices(coord_position, x_vector, y_vector,
+            coord_verts = sprytile_core.get_build_vertices(coord_position, x_vector, y_vector,
                                                         up_vector, right_vector)
             # Get the center of the preview verts
             vtx_center = Vector((0, 0, 0))

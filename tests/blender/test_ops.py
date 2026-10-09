@@ -558,6 +558,11 @@ def test_verify_tile_object_matches_api(tileset, tmp_path):
     assert mismatch.max_channel_delta > 12.0
 
 
+def test_reload_core_matches_api():
+    report = ops.reload_core()
+    assert list(report.reloaded) == ops._addon_api().reload_core()["reloaded"]
+
+
 def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     from blended.ops._contract import is_reads_only
 

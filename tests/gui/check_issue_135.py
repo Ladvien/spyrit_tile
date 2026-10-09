@@ -149,7 +149,7 @@ def gui_cls():
 
 
 def current_tool():
-    utils = importlib.import_module(PKG + ".sprytile_utils")
+    utils = importlib.import_module(PKG + ".sprytile_core")
     with ov():
         return utils.get_current_tool(bpy.context)
 

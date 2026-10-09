@@ -1,5 +1,5 @@
 import bpy
-from . import sprytile_utils
+from . import sprytile_core
 from bpy.types import Panel, UIList
 
 
@@ -10,7 +10,7 @@ class VIEW3D_UL_SprytileMaterialGridList(bpy.types.UIList):
 
     def draw_item(self, context, layout, data, item, icon, active_data, active_propname, index):
         if item.mat_id != "":
-            mat_data = sprytile_utils.get_mat_data(context, item.mat_id)
+            mat_data = sprytile_core.get_mat_data(context, item.mat_id)
             if mat_data is None or item.mat_id not in bpy.data.materials:
                 layout.label(text="Invalid Data")
                 return
@@ -20,7 +20,7 @@ class VIEW3D_UL_SprytileMaterialGridList(bpy.types.UIList):
                 return
 
             display_icon = layout.icon(material)
-            texture = sprytile_utils.get_grid_texture(context.object, mat_data.grids[0])
+            texture = sprytile_core.get_grid_texture(context.object, mat_data.grids[0])
             if texture is not None:
                 display_icon = layout.icon(texture)
 
@@ -31,7 +31,7 @@ class VIEW3D_UL_SprytileMaterialGridList(bpy.types.UIList):
             row.prop(item, "mat_name", text="", emboss=False, icon_value=display_icon)
 
         elif item.grid_id != "":
-            grid = sprytile_utils.get_grid(context, item.grid_id)
+            grid = sprytile_core.get_grid(context, item.grid_id)
             if grid is not None:
                 split = layout.split(factor=0.65, align=True)
                 split.prop(grid, "name", text="")
@@ -237,7 +237,7 @@ class VIEW3D_PT_SprytilePanel(bpy.types.Panel):
         if len(scene.sprytile_mats) == 0:
             return
 
-        selected_grid = sprytile_utils.get_grid(context, obj.sprytile_gridid)
+        selected_grid = sprytile_core.get_grid(context, obj.sprytile_gridid)
         if selected_grid is None:
             return
 

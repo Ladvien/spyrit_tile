@@ -6,7 +6,7 @@ from bpy_extras import view3d_utils
 from math import floor, ceil, copysign
 from bpy.props import *
 from mathutils import Vector, Matrix
-from . import sprytile_utils, sprytile_modal, sprytile_builder
+from . import sprytile_modal, sprytile_builder, sprytile_core
 from gpu_extras.batch import batch_for_shader
 from .sprytile_tools.tool_build import ToolBuild
 from .sprytile_tools.tool_paint import ToolPaint
@@ -335,7 +335,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             self.exit(context)
             return {'CANCELLED'}
 
-        cur_tool = sprytile_utils.get_current_tool(context)
+        cur_tool = sprytile_core.get_current_tool(context)
         if cur_tool is None or not cur_tool.startswith("sprytile"):
             self.exit(context)
             return {'CANCELLED'}
@@ -480,8 +480,8 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 
     @staticmethod
     def mouse_over_ui_region(context, event):
-        """See sprytile_utils.mouse_over_ui_region, kept here for convenience."""
-        return sprytile_utils.mouse_over_ui_region(context, event)
+        """See sprytile_core.mouse_over_ui_region, kept here for convenience."""
+        return sprytile_core.mouse_over_ui_region(context, event)
 
     @staticmethod
     def get_region_padding(context):
@@ -645,7 +645,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             # Files saved before the texture node filter carry entries for
             # materials that cannot be tilesets, clear them without waiting for
             # the user to press Validate Tile Grids
-            sprytile_utils.prune_textureless_grids(context)
+            sprytile_core.prune_textureless_grids(context)
 
         self.apply_margin_change(context, sprytile_ui)
 
@@ -691,7 +691,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         obj = context.object
         ret_val = 'RUNNING_MODAL'
 
-        tilegrid = sprytile_utils.get_grid(context, obj.sprytile_gridid)
+        tilegrid = sprytile_core.get_grid(context, obj.sprytile_gridid)
         tex_size = VIEW3D_OP_SprytileGui.tex_size
         
         display_offset, display_size, size_half, display_min, display_max = self.calc_palette_pos(context)
@@ -779,7 +779,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             ratio_pos = Vector((click_pos.x / display_size[0], click_pos.y / display_size[1]))
             tex_pos = Vector((ratio_pos.x * tex_size[0], ratio_pos.y * tex_size[1], 0))
             # Apply grid matrix to tex_pos
-            grid_matrix = sprytile_utils.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
+            grid_matrix = sprytile_core.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
             tex_pos = grid_matrix.inverted() @ tex_pos
 
             grid_max = Vector((ceil(tex_size[0]/tilegrid.grid[0])-1, ceil(tex_size[1]/tilegrid.grid[1])-1))
@@ -905,12 +905,12 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             obj.sprytile_gridid = grid_id
 
         # Get the current tile grid, to fetch the texture size to render to
-        tilegrid = sprytile_utils.get_grid(context, grid_id)
+        tilegrid = sprytile_core.get_grid(context, grid_id)
         target_img = None
 
         tex_size = 128, 128
         if tilegrid is not None:
-            target_img = sprytile_utils.get_grid_texture(obj, tilegrid)
+            target_img = sprytile_core.get_grid_texture(obj, tilegrid)
             if target_img is not None:
                 tex_size = target_img.size[0], target_img.size[1]
 
@@ -973,7 +973,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 
         sprytile_data = context.scene.sprytile_data
         show_extra = sprytile_data.show_extra or sprytile_data.show_overlay
-        tilegrid = sprytile_utils.get_selected_grid(context)
+        tilegrid = sprytile_core.get_selected_grid(context)
 
         if tilegrid is None or VIEW3D_OP_SprytileGui.loaded_grid is None or VIEW3D_OP_SprytileGui.texture_grid is None or bpy.data.images.find(VIEW3D_OP_SprytileGui.texture_grid) < 0:
             return
@@ -1035,7 +1035,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         offscreen = VIEW3D_OP_SprytileGui.offscreen
         target_img = VIEW3D_OP_SprytileGui.texture_grid
         tex_size = VIEW3D_OP_SprytileGui.tex_size
-        projection_mat = sprytile_utils.get_ortho2D_matrix(0, tex_size[0], 0, tex_size[1])
+        projection_mat = sprytile_core.get_ortho2D_matrix(0, tex_size[0], 0, tex_size[1])
 
         offscreen.bind()
         framebuffer = gpu.state.active_framebuffer_get()
@@ -1053,7 +1053,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         VIEW3D_OP_SprytileGui.draw_full_tex_quad(quad_pos, projection_mat, grid_texture, True)
 
         # Translate the gl context by grid matrix
-        grid_matrix = sprytile_utils.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
+        grid_matrix = sprytile_core.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
         matrix_vals = [(grid_matrix[i][0], grid_matrix[i][1], grid_matrix[i][2], grid_matrix[i][3]) for i in range(4)]
         mvp_mat = projection_mat @ Matrix(matrix_vals)
 
@@ -1062,7 +1062,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         padding = VIEW3D_OP_SprytileGui.loaded_grid.padding
         margin = VIEW3D_OP_SprytileGui.loaded_grid.margin
         curr_sel = VIEW3D_OP_SprytileGui.loaded_grid.tile_selection
-        is_pixel_grid = sprytile_utils.grid_is_single_pixel(VIEW3D_OP_SprytileGui.loaded_grid)
+        is_pixel_grid = sprytile_core.grid_is_single_pixel(VIEW3D_OP_SprytileGui.loaded_grid)
         is_use_mouse = context.scene.sprytile_ui.use_mouse
         is_selecting = VIEW3D_OP_SprytileGui.is_selecting
 
@@ -1169,7 +1169,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if sprytile_data.paint_mode == "FILL":
             plane_size = sprytile_data.fill_plane_size
 
-        grid_min, grid_max = sprytile_utils.get_workplane_area(plane_size[0], plane_size[1])
+        grid_min, grid_max = sprytile_core.get_workplane_area(plane_size[0], plane_size[1])
 
         def draw_world_line(world_start, world_end, color):
             start = view3d_utils.location_3d_to_region_2d(region, rv3d, world_start)
@@ -1226,7 +1226,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 
         # Setup to draw grid into viewport
         offset_matrix = Matrix.Translation((view_min.x, view_min.y, 0))
-        grid_matrix = sprytile_utils.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
+        grid_matrix = sprytile_core.get_grid_matrix(VIEW3D_OP_SprytileGui.loaded_grid)
         grid_matrix = Matrix.Scale(scale_factor[0], 4, Vector((1, 0, 0))) @ Matrix.Scale(scale_factor[1], 4, Vector((0, 1, 0))) @ grid_matrix
         grid_mat = offset_matrix @ grid_matrix
 
@@ -1339,7 +1339,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         tile_sel = VIEW3D_OP_SprytileGui.loaded_grid.tile_selection
         padding = VIEW3D_OP_SprytileGui.loaded_grid.padding
         margin = VIEW3D_OP_SprytileGui.loaded_grid.margin
-        is_pixel = sprytile_utils.grid_is_single_pixel(VIEW3D_OP_SprytileGui.loaded_grid)
+        is_pixel = sprytile_core.grid_is_single_pixel(VIEW3D_OP_SprytileGui.loaded_grid)
 
         # Draw work plane
         VIEW3D_OP_SprytileGui.draw_work_plane(grid_size, sprytile_data, cursor_loc, region, rv3d, middle_btn)
@@ -1426,7 +1426,7 @@ class SprytileGuiWidgetGroup(bpy.types.GizmoGroup):
 
     def setup(self, context):
         # Get current selected tool
-        cur_tool = sprytile_utils.get_current_tool(context)
+        cur_tool = sprytile_core.get_current_tool(context)
         sprytile_data = context.scene.sprytile_data
         # Remember where the tool was activated. Timers run with a restricted
         # context, so the operator has to be called under a temp_override.

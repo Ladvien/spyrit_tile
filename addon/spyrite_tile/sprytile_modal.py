@@ -13,7 +13,7 @@ from .sprytile_tools.tool_build import ToolBuild
 from .sprytile_tools.tool_paint import ToolPaint
 from .sprytile_tools.tool_fill import ToolFill
 from .sprytile_uv import UvDataLayers
-from . import sprytile_utils
+from . import sprytile_core
 from . import sprytile_preview
 from .sprytile_builder import TileBuilder
 
@@ -91,8 +91,8 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         # downward, with up on Y axis. Apply view rotation to get current up
         view_up_vector = rv3d.view_rotation @ Vector((0.0, 1.0, 0.0))
 
-        plane_normal = sprytile_utils.snap_vector_to_axis(view_vector, mirrored=True)
-        up_vector = sprytile_utils.snap_vector_to_axis(view_up_vector)
+        plane_normal = sprytile_core.snap_vector_to_axis(view_vector, mirrored=True)
+        up_vector = sprytile_core.snap_vector_to_axis(view_up_vector)
 
         # calculated vectors are not perpendicular, don't set data
         if plane_normal.dot(up_vector) != 0.0:
@@ -220,7 +220,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
     @staticmethod
     def cursor_move_layer(context, direction):
         scene = context.scene
-        target_grid = sprytile_utils.get_grid(context, context.object.sprytile_gridid)
+        target_grid = sprytile_core.get_grid(context, context.object.sprytile_gridid)
         grid_x = target_grid.grid[0]
         grid_y = target_grid.grid[1]
         layer_move = min(grid_x, grid_y)
@@ -255,7 +255,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
         # Cursor over Blender's own toolbar, sidebar or headers. The window
         # region runs underneath them with region overlap on, so without this
         # the paint modal would swallow clicks meant for their buttons.
-        if sprytile_utils.mouse_over_ui_region(context, event):
+        if sprytile_core.mouse_over_ui_region(context, event):
             sprytile_preview.clear_preview_data()
             return {'PASS_THROUGH'}
 
@@ -344,10 +344,10 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
 
         # If the selected object does not own the painting material, add a slot for it here
         if left_down:
-            grid = sprytile_utils.get_grid(context, context.object.sprytile_gridid)
+            grid = sprytile_core.get_grid(context, context.object.sprytile_gridid)
             if grid is not None:
-                grid_mat = sprytile_utils.get_grid_material(grid)
-                if not sprytile_utils.has_material(context.object, grid_mat):
+                grid_mat = sprytile_core.get_grid_material(grid)
+                if not sprytile_core.has_material(context.object, grid_mat):
                     bpy.ops.object.material_slot_add()
                     context.object.active_material = grid_mat
 
@@ -460,7 +460,7 @@ class VIEW3D_OP_SprytileModalTool(bpy.types.Operator):
             return {'CANCELLED'}
 
         use_default_grid_id = obj.sprytile_gridid == -1
-        if sprytile_utils.get_grid(context, obj.sprytile_gridid) is None:
+        if sprytile_core.get_grid(context, obj.sprytile_gridid) is None:
             use_default_grid_id = True
 
         if use_default_grid_id:

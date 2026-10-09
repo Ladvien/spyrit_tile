@@ -14,7 +14,7 @@ import bpy
 import pytest
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
-sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
 OTHER_IMAGE = FIXTURE_IMAGE.with_name("tiles_oriented_16px.png")  # a second image: the same image + layout would reuse the tileset
@@ -38,7 +38,7 @@ def _remove_test_data():
         bpy.data.materials.remove(material)
     if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)
@@ -135,14 +135,14 @@ def test_create_tileset_reports_layout(tileset):
     assert tileset["image_name"] in bpy.data.images
 
     material = bpy.data.materials[TILESET]
-    node = sprytile_utils.get_material_texture_node(material)
+    node = sprytile_core.get_material_texture_node(material)
     assert node is not None
     assert node.interpolation == "Closest"
     assert node.image.name == tileset["image_name"]
     assert material.surface_render_method == "DITHERED"
     assert material.users >= 1
 
-    mat_data = sprytile_utils.get_mat_data(bpy.context, TILESET)
+    mat_data = sprytile_core.get_mat_data(bpy.context, TILESET)
     grid = mat_data.grids[0]
     assert grid.id == tileset["grid_id"]
     assert tuple(grid.grid) == (16, 16)
@@ -159,13 +159,13 @@ def test_create_tileset_twice_reuses_material_and_grid(tileset):
 def test_create_tileset_padding_and_margin_keep_tile_size_and_layout():
     report = api.create_tileset(TILESET, str(FIXTURE_IMAGE), (14, 14), padding_px=(1, 1))
     assert report["columns"] == 4 and report["rows"] == 4
-    grid = sprytile_utils.get_mat_data(bpy.context, TILESET).grids[0]
+    grid = sprytile_core.get_mat_data(bpy.context, TILESET).grids[0]
     assert tuple(grid.grid) == (14, 14)
     assert tuple(grid.padding) == (1, 1)
 
     report = api.create_tileset(TILESET, str(FIXTURE_IMAGE), (14, 14), margin_px=(1, 1, 1, 1))
     assert report["columns"] == 4 and report["rows"] == 4
-    grid = sprytile_utils.get_mat_data(bpy.context, TILESET).grids[0]
+    grid = sprytile_core.get_mat_data(bpy.context, TILESET).grids[0]
     assert tuple(grid.grid) == (14, 14)
     assert tuple(grid.padding) == (0, 0)
     assert tuple(grid.margin) == (1, 1, 1, 1)
@@ -439,7 +439,7 @@ def test_two_tilesets_on_one_object_get_their_own_material_slots(tile_object):
     api.place_tiles(OBJECT, PREFIX + "other", [{"cell_xy": (1, 0), "tile_xy": (0, 0)}])
     described = api.describe_tile_object(OBJECT)
     assert [f["material"] for f in described["faces"]] == [TILESET, PREFIX + "other"]
-    assert tile_object.sprytile_gridid == sprytile_utils.get_mat_data(bpy.context, TILESET).grids[0].id
+    assert tile_object.sprytile_gridid == sprytile_core.get_mat_data(bpy.context, TILESET).grids[0].id
 
 
 # --- fill / remove -----------------------------------------------------------------------------------------
@@ -761,7 +761,7 @@ def test_mode_restored_when_the_call_fails(tile_object):
 
 def test_sprytile_settings_are_restored(tile_object):
     data = bpy.context.scene.sprytile_data
-    grid = sprytile_utils.get_mat_data(bpy.context, TILESET).grids[0]
+    grid = sprytile_core.get_mat_data(bpy.context, TILESET).grids[0]
     data.uv_flip_x = True
     data.uv_flip_y = True
     data.mesh_rotate = math.radians(180)

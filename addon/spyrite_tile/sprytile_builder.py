@@ -5,7 +5,7 @@ from mathutils.bvhtree import BVHTree
 from mathutils.geometry import distance_point_to_plane
 
 from . import sprytile_uv
-from . import sprytile_utils
+from . import sprytile_core
 from .sprytile_uv import UvDataLayers
 
 
@@ -210,7 +210,7 @@ class TileBuilder:
         if face_index is None or face_index < 0:
             face_position = grid_origin + grid_coord[0] * grid_right + grid_coord[1] * grid_up
 
-            face_verts = sprytile_utils.get_build_vertices(face_position,
+            face_verts = sprytile_core.get_build_vertices(face_position,
                                                  grid_right * grid_size[0], grid_up * grid_size[1],
                                                  up_vector, right_vector)
             face_index = self.create_face(context, face_verts)
