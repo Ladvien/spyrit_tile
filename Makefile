@@ -2,7 +2,7 @@ BLENDER ?= /Applications/Blender.app/Contents/MacOS/Blender
 ADDON_DIR ?= addon/spyrite_tile
 ADDON_ABS := $(abspath $(ADDON_DIR))
 
-.PHONY: test-live test-visual install-addon install-blended-plugin blender-test-deps test-pure test-blender
+.PHONY: test-gui test-live test-visual install-addon install-blended-plugin blender-test-deps test-pure test-blender
 
 # Link the add-on (extension id `spyrite_tile`) into the user's Blender and
 # enable it. A symlink, so the repo is what Blender loads; restart Blender
@@ -59,3 +59,8 @@ test-visual:
 	$(OPROBE) --object spyrite_orient_xy --view top --placements outputs/live_smoke/placements_XY.json --out outputs/visual_probe/orient_xy
 	$(OPROBE) --object spyrite_orient_xz --view front --placements outputs/live_smoke/placements_XZ.json --out outputs/visual_probe/orient_xz
 	$(OPROBE) --object spyrite_orient_yz --view right --placements outputs/live_smoke/placements_YZ.json --out outputs/visual_probe/orient_yz
+
+# GUI layer in real isolated Blender windows: the smoke test plus every per-issue check.
+test-gui:
+	tests/gui/run_gui_smoke.sh
+	set -e; for f in tests/gui/check_issue_*.py; do [ -e "$$f" ] || continue; tests/gui/run_gui_check.sh "$$f"; done
