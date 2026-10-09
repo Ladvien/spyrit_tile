@@ -13,22 +13,22 @@ skills, scripts and docs come from the `spyrite-tile-dev` MCP server (resources 
 1. `declare_plan` (once, before any scene-changing call).
 2. `scene_report`: existing tilesets (with `tile_names`), tile objects, removed tilesets.
 3. Tiles: generate with `spyrite-tile-gen` (`generate_tile`, `compose_atlas(names=[...])` writes the
-   `<stem>.spyrite.yaml` name sidecar), then `import_tileset`. Use the report's `material_name`
-   (tilesets are idempotent: `reused_material`).
+   `<stem>.spyrite.yaml` name sidecar), then `import_tileset`. Pass the report's `material_name` as `tileset_name`
+   to later ops (tilesets are idempotent: `reused_material`).
 4. Build, smallest step first:
    - whole scene from YAML: `build_spec(spec_path)` (example: resource `spyrite://specs/example`);
-     `export_spec(object_names, spec_path)` writes a scene back out;
-   - or `create_tile_object`, then `place_tiles`, `fill_tiles`, `fill_pattern` (random/stamp/autotile),
-     `build_room`, `extrude_edge`, `move_faces`, `paint_faces`, `remove_tiles`;
-   - non-contiguous edits: `select_faces(object_name, where)` then `paint_faces` on the indices;
-   - decals: `create_overlay_object` (child object lifted off the base plane).
+     `export_spec(objects, spec_path)` writes a scene back out;
+   - or `create_tile_object(name, tileset_name)`, then `place_tiles`, `fill_tiles`, `fill_pattern` (random/stamp/autotile),
+     `build_room`, `extrude_edge` (`count` wall rows), `move_faces`, `paint_faces`, `remove_tiles`;
+   - non-contiguous edits: `select_tile_faces(object_name, where)` then `paint_faces` on the indices;
+   - decals: `create_overlay_object(name, base_object_name, tileset_name)` (child object lifted off the base plane).
    Tiles may be given by name or `[column, row]`.
 5. Read back: `tile_object_report` (per face tile/name, span, rotation, flips, layer, plane, cell,
    offset, `on_grid`). Check every number the brief gave.
 6. Prove it: `verify_tile_object(object_name, view)` renders with Workbench and compares every face
    to its tile pixels (`ok`, `mismatches`, `evidence_dir`).
 7. Look: `set_pixel_art_view`, then `render_views`; read the images yourself.
-8. Before risky or multi-step edits: `checkpoint`; on failure `rollback(checkpoint_id)`; finish with
+8. Before risky or multi-step edits: `checkpoint(objects)`; on failure `rollback(checkpoint_id)`; finish with
    `discard_checkpoint`. `list_checkpoints` shows what exists (session-only).
 9. After editing add-on code: `reload_core` (no Blender restart; registered classes still need one).
 
