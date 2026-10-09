@@ -281,6 +281,21 @@ def test_scene_report_matches_api(tileset):
     assert reading.auto_merge is api_scene["settings"]["auto_merge"]
 
 
+def test_select_tile_faces_matches_api(tileset):
+    _create_object_pair()
+    ops.fill_tiles(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (2, 2), (0, 0))
+    ops.fill_tiles(OPS_OBJECT_NAME, TILESET_NAME, (1, 1), (1, 1), (2, 2))
+    selector = ops.TileFaceSelector(tile=(2, 2), plane="XY", cell_min_xy=(0, 0), cell_max_xy=(2, 2))
+    selection = ops.select_tile_faces(OPS_OBJECT_NAME, selector)
+    direct = _api().select_faces(
+        OPS_OBJECT_NAME, {"tile": [2, 2], "plane": "XY", "cell_min_xy": [0, 0], "cell_max_xy": [2, 2]}
+    )
+    assert selection.face_indices == tuple(direct["face_indices"]) and selection.count == direct["count"] == 1
+    region = ops.select_tile_faces(OPS_OBJECT_NAME, ops.TileFaceSelector(plane="XY", connected_to_cell=(0, 0)))
+    assert region.count == 8
+    assert ops.select_tile_faces(OPS_OBJECT_NAME, ops.TileFaceSelector()).count == 9
+
+
 def test_named_tiles_through_ops_match_api(tmp_path):
     import shutil
 
@@ -404,6 +419,7 @@ def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     assert [name for name in ops.__all__ if is_reads_only(getattr(ops, name))] == [
         "tile_object_report",
         "scene_report",
+        "select_tile_faces",
         "export_spec",
     ]
 
