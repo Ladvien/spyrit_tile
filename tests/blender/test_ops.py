@@ -452,11 +452,11 @@ def test_checkpoint_ops_match_api(tileset):
     ]
     ops.remove_tiles(OPS_OBJECT_NAME, [(0, 0), (1, 1)])
     assert ops.tile_object_report(OPS_OBJECT_NAME).face_count == 2
-    restored = ops.rollback(made.checkpoint_id)
+    restored = ops.rollback(str(made.checkpoint_id))
     api_restored = _api().rollback(api_made["checkpoint_id"])
     assert restored.restored == (OPS_OBJECT_NAME,) and api_restored["restored"] == [API_OBJECT_NAME]
     assert ops.tile_object_report(OPS_OBJECT_NAME).face_count == 4
-    assert ops.discard_checkpoint(made.checkpoint_id).discarded == (OPS_OBJECT_NAME,)
+    assert ops.discard_checkpoint(str(made.checkpoint_id)).discarded == (OPS_OBJECT_NAME,)
     _api().discard_checkpoint(api_made["checkpoint_id"])
     assert ops.list_checkpoints().checkpoints == ()
 

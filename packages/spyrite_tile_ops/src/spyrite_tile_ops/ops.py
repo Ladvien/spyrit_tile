@@ -826,6 +826,16 @@ def scene_report() -> SceneReading:
     )
 
 
+def _checkpoint_number(checkpoint_id: str) -> int:
+    """The checkpoint id as an int; ids travel as text because blended reserves bare numeric parameters for quantities."""
+    try:
+        return int(checkpoint_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"checkpoint_id must be the number from checkpoint or list_checkpoints, got {checkpoint_id!r}"
+        ) from None
+
+
 def checkpoint(objects: list[str] | None = None, label: str = "") -> CheckpointReport:
     """Snapshot tile objects (all tile objects when objects is omitted) so rollback can restore them."""
     result = _addon_api().checkpoint(object_names=objects, label=label)
@@ -834,17 +844,17 @@ def checkpoint(objects: list[str] | None = None, label: str = "") -> CheckpointR
     )
 
 
-def rollback(checkpoint_id: int) -> RollbackReport:
+def rollback(checkpoint_id: str) -> RollbackReport:
     """Restore every object of a checkpoint (mesh, grid, materials, transform); the checkpoint stays usable."""
-    result = _addon_api().rollback(checkpoint_id=checkpoint_id)
+    result = _addon_api().rollback(checkpoint_id=_checkpoint_number(checkpoint_id))
     return RollbackReport(
         checkpoint_id=int(result["checkpoint_id"]), restored=tuple(result["restored"])
     )
 
 
-def discard_checkpoint(checkpoint_id: int) -> DiscardReport:
+def discard_checkpoint(checkpoint_id: str) -> DiscardReport:
     """Forget a checkpoint and delete its hidden mesh copies."""
-    result = _addon_api().discard_checkpoint(checkpoint_id=checkpoint_id)
+    result = _addon_api().discard_checkpoint(checkpoint_id=_checkpoint_number(checkpoint_id))
     return DiscardReport(
         checkpoint_id=int(result["checkpoint_id"]), discarded=tuple(result["discarded"])
     )
