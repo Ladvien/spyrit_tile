@@ -209,6 +209,7 @@ def test_sidecar_that_does_not_fit_the_layout_still_reads_back():
     assert (tileset["columns"], tileset["rows"]) == (2, 2)
     assert tileset["tile_names"]["wall_top"]["xy"] == [2, 0]
 
+
 def test_wall_decal_is_lifted_toward_minus_y(tile_object):
     api.place_tiles(
         OBJECT,
