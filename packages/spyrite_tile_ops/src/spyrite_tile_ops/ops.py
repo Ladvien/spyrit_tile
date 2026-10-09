@@ -312,6 +312,8 @@ class TileFaceSelection:
     face_indices: tuple[int, ...]
     count: int
 
+
+@dataclass(frozen=True)
 class CheckpointReport:
     """A checkpoint just taken: its id and the objects it covers."""
 

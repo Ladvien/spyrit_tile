@@ -591,10 +591,9 @@ def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
         "tile_object_report",
         "scene_report",
         "select_tile_faces",
+        "list_checkpoints",
         "export_spec",
         "verify_tile_object",
-
-        "list_checkpoints",
     ]
 
 
