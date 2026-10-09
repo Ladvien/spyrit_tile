@@ -439,7 +439,7 @@ class UTIL_OP_SprytileSetupViewport(bpy.types.Operator):
 class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
     bl_idname = "sprytile.tileset_load"
     bl_label = "Load Tileset"
-    bl_description = "Load a tileset into the current material"
+    bl_description = "Load a tileset into the current material; an existing tileset for the same image is reused"
 
     # For some reason this full list doesn't really work,
     # reordered the list to prioritize common file types
@@ -457,7 +457,9 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         if context.object.type != 'MESH':
             return {'FINISHED'}
-        if UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath):
+        reused = UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath)
+        if reused is not None:
+            self.report({'INFO'}, "Reused existing tileset '{0}' for this image".format(reused.name))
             return {'FINISHED'}
         # Check object material count, if 0 create a new material before loading
         if len(context.object.material_slots.items()) < 1:
@@ -470,7 +472,8 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
         """Use the existing tileset material built from this image file, if there is one.
 
         Appends it to the active object's material slots (or selects its slot) and keeps the tileset's grid
-        settings. Returns False when no tileset uses the file, so the caller creates a new material.
+        settings and re-highlights it in the grid list. Returns the material, or None when no tileset uses the
+        file, so the caller creates a new material.
         """
         wanted = path.realpath(abspath(filepath))
         existing = None
@@ -483,7 +486,7 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
                 existing = material
                 break
         if existing is None:
-            return False
+            return None
         obj = context.object
         slot_index = next((i for i, slot in enumerate(obj.material_slots) if slot.material == existing), None)
         if slot_index is None:
@@ -491,7 +494,8 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
             slot_index = len(obj.material_slots) - 1
         obj.active_material_index = slot_index
         obj.sprytile_gridid = sprytile_core.get_mat_data(context, existing.name).grids[0].id
-        return True
+        sprytile_core.build_grid_list(context.scene, obj)
+        return existing
 
     @staticmethod
     def load_tileset_file(context, filepath):
@@ -522,7 +526,7 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
 class UTIL_OP_SprytileNewTileset(bpy.types.Operator, ImportHelper):
     bl_idname = "sprytile.tileset_new"
     bl_label = "Add Tileset"
-    bl_description = "Create a new material and load another tileset"
+    bl_description = "Create a new material and load another tileset; an existing tileset for the same image is reused"
 
     # For some reason this full list doesn't really work,
     # reordered the list to prioritize common file types
@@ -540,7 +544,9 @@ class UTIL_OP_SprytileNewTileset(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         if context.object.type != 'MESH':
             return {'FINISHED'}
-        if UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath):
+        reused = UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath)
+        if reused is not None:
+            self.report({'INFO'}, "Reused existing tileset '{0}' for this image".format(reused.name))
             return {'FINISHED'}
         bpy.ops.sprytile.add_new_material('INVOKE_DEFAULT')
         UTIL_OP_SprytileLoadTileset.load_tileset_file(context, self.filepath)
