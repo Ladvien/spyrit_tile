@@ -97,6 +97,64 @@ def mouse_over_ui_region(context, event):
     return False
 
 
+# Event types that only ever mean "move the view", whatever the keymap says
+NAVIGATION_EVENT_TYPES = {
+    'MIDDLEMOUSE',
+    'WHEELUPMOUSE', 'WHEELDOWNMOUSE', 'WHEELINMOUSE', 'WHEELOUTMOUSE',
+    'WHEELLEFTMOUSE', 'WHEELRIGHTMOUSE',
+    'TRACKPADPAN', 'TRACKPADZOOM', 'MOUSEROTATE', 'MOUSESMARTZOOM',
+    'NDOF_MOTION',
+}
+
+# 3D View keymap items that move the view, matched by operator name
+NAVIGATION_OPERATORS = {
+    'view3d.rotate', 'view3d.move', 'view3d.zoom', 'view3d.dolly',
+    'view3d.view_orbit', 'view3d.view_pan', 'view3d.view_roll',
+    'view3d.navigate', 'view3d.view_center_pick',
+    'view3d.ndof_orbit', 'view3d.ndof_orbit_zoom', 'view3d.ndof_pan', 'view3d.ndof_all',
+}
+
+
+def is_view_navigation_event(context, event):
+    """True when this event starts or continues moving the viewport.
+
+    Sprytile's Alt (tile picker), S (snap cursor) and N (set normal) modals
+    stay alive while their key is held and used to swallow every event. That
+    broke orbit, pan and zoom in keymaps that navigate with a modifier, such
+    as Industry Compatible (Alt+LMB/MMB/RMB) and Emulate 3 Button Mouse
+    (Alt+LMB arrives as a middle mouse press). The check goes by the active
+    keymap, so a user remapped navigation is honoured too.
+    """
+    if event.type in NAVIGATION_EVENT_TYPES:
+        return True
+    # Mouse moves (value NOTHING), releases and key repeats never start a navigation
+    if event.value not in {'PRESS', 'CLICK', 'CLICK_DRAG', 'DOUBLE_CLICK'}:
+        return False
+
+    keyconfig = context.window_manager.keyconfigs.active
+    keymap = keyconfig.keymaps.get('3D View') if keyconfig is not None else None
+    if keymap is None:
+        return False
+
+    def modifier_matches(kmi_state, event_state):
+        # -1 is "any state"
+        return kmi_state == -1 or bool(kmi_state) == bool(event_state)
+
+    for kmi in keymap.keymap_items:
+        if kmi.idname not in NAVIGATION_OPERATORS or not kmi.active or kmi.type != event.type:
+            continue
+        # Click and drag items start with a plain press
+        if kmi.value not in {event.value, 'ANY', 'CLICK', 'CLICK_DRAG', 'DOUBLE_CLICK'}:
+            continue
+        if kmi.any or (modifier_matches(kmi.shift, event.shift) and
+                       modifier_matches(kmi.ctrl, event.ctrl) and
+                       modifier_matches(kmi.alt, event.alt) and
+                       modifier_matches(kmi.oskey, event.oskey)):
+            return True
+    return False
+
+
+
 def get_ortho2D_matrix(left, right, bottom, top):
     rl = right - left
     rl2 = right + left
@@ -1750,6 +1808,14 @@ class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
             bpy.context.window.cursor_modal_restore()
             return {'FINISHED'}
 
+        # Hand navigation to the viewport (see is_view_navigation_event). The
+        # navigation modal swallows the S release, so end snapping here
+        # instead of waiting for a release that never arrives.
+        if is_view_navigation_event(context, event):
+            context.scene.sprytile_data.is_snapping = False
+            bpy.context.window.cursor_modal_restore()
+            return {'FINISHED', 'PASS_THROUGH'}
+
         self.snap_cursor(context, event)
         return {'RUNNING_MODAL'}
 
@@ -1874,10 +1940,15 @@ class UTIL_OP_SprytileTilePicker(bpy.types.Operator):
     bl_label = "Tile Picker (Spyrite Tile)"
 
     def modal(self, context, event):
-        if not event.alt:
+        # Alt came up, or Alt+click is navigation here (Industry Compatible
+        # orbits with it) or was turned into a middle mouse press by Emulate 3
+        # Button Mouse, which also strips the Alt flag. Either way the event is
+        # not ours: finish and let it through, the viewport swallows the Alt
+        # release that would end us otherwise.
+        if not event.alt or is_view_navigation_event(context, event):
             bpy.context.window.cursor_modal_restore()
             context.scene.sprytile_data.is_picking = False
-            return {'FINISHED'}
+            return {'FINISHED', 'PASS_THROUGH'}
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             self.tile_pick(context, event)
@@ -1978,6 +2049,14 @@ class UTIL_OP_SprytileSetNormal(bpy.types.Operator):
             bpy.context.window.cursor_modal_restore()
             context.scene.sprytile_data.is_picking = False
             return {'FINISHED'}
+
+        # Hand navigation to the viewport (see is_view_navigation_event). The
+        # navigation modal swallows the N release, so end here instead of
+        # waiting for a release that never arrives.
+        if is_view_navigation_event(context, event):
+            bpy.context.window.cursor_modal_restore()
+            context.scene.sprytile_data.is_picking = False
+            return {'FINISHED', 'PASS_THROUGH'}
 
         if event.type == 'LEFTMOUSE' and event.value == 'PRESS':
             # get the context arguments
