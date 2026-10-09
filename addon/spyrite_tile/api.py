@@ -450,6 +450,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
                 "rows": rows,
                 "grid_id": existing.grid.id,
                 "reused_material": existing.material.name,
+                "tile_names": existing.tile_names(),
             }
         material = bpy.data.materials.new(material_name)
     material.use_fake_user = True
@@ -1073,8 +1074,8 @@ def describe_tile_object(object_name, max_faces=500):
       at; a decal reports its lifted offset), ``cell_xy`` (cell holding the face's minimum corner, None
       without plane) and ``on_grid`` (true for a rectangle aligned to whole cells on one offset, i.e. what
       ``place_tiles`` builds; false for hand modelled geometry);
-    - ``tileset``: material name of the face's tileset ('' if none); ``tile``: tile name, None until the
-      tileset has names.
+    - ``tileset``: material name of the face's tileset ('' if none); ``tile``: the tile's name from the
+      tileset's sidecar (None when unnamed).
     Works in any mode without changing it.
     """
     obj = _mesh_object(object_name)

@@ -294,10 +294,10 @@ def test_named_tiles_through_ops_match_api(tmp_path):
         assert report.tile_names == _api().create_tileset(
             TILESET_NAME, str(image), TILE_SIZE_PX
         )["tile_names"]
-        scene_tiles = next(t for t in ops.scene_report().tilesets if t.material_name == TILESET_NAME)
-        assert scene_tiles.tile_names == report.tile_names
         assert report.tile_names["wall"] == {"xy": [1, 0], "planes": ["XZ"], "tags": []}
         _create_object_pair()
+        scene_tiles = next(t for t in ops.scene_report().tilesets if t.material_name == TILESET_NAME)
+        assert scene_tiles.tile_names == report.tile_names
         placements = [
             ops.TilePlacement(cell_xy=(0, 0), tile="grass"),
             ops.TilePlacement(cell_xy=(1, 0), tile="wall", plane="XZ"),
