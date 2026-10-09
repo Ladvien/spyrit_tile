@@ -215,8 +215,8 @@ def _build_error(workdir, text):
 def test_spec_errors_are_raised_before_anything_is_built(workdir):
     assert _build_error(workdir, TWO_OBJECTS.replace("spyrite_spec: 1", "spyrite_spec: 2")) == "spyrite_spec: must be 1"
     assert _build_error(workdir, "spyrite_spec: 1\nbogus: 1\n").startswith("spec: unknown keys ['bogus']; valid keys are [")
-    assert _build_error(workdir, TWO_OBJECTS.replace("    fills:", "    patterns: []\n    fills:", 1)).startswith(
-        f"objects.{ROOM}: unknown keys ['patterns']"
+    assert _build_error(workdir, TWO_OBJECTS.replace("    fills:", "    bogus: []\n    fills:", 1)).startswith(
+        f"objects.{ROOM}: unknown keys ['bogus']"
     )
     assert _build_error(workdir, TWO_OBJECTS.replace("tile: grass", "tile: lava")) == (
         f"objects.{ROOM}.fills[0].tile: unknown tile name 'lava' in tileset {TERRAIN!r}; "

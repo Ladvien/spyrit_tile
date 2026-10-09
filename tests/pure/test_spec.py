@@ -39,6 +39,26 @@ VALID = {
 }
 
 
+def _autotile(extra=False):
+    tiles = {str(k): "grass" for k in range(16)}
+    if extra:
+        tiles["16"] = "grass"
+    return tiles
+
+
+def _pattern(spec, **overrides):
+    """Install (once) a valid random pattern on the room, apply overrides, and return it for mutation."""
+    patterns = spec["objects"]["room"].setdefault("patterns", [])
+    if not patterns:
+        patterns.append({"kind": "random", "tiles": ["grass", "stone"], "seed": 1, "cells": [[0, 0]]})
+    for key, value in overrides.items():
+        patterns[0][key] = value
+    if overrides.get("kind") in ("stamp", "autotile"):
+        patterns[0].pop("tiles", None) if overrides["kind"] == "stamp" else None
+        patterns[0].pop("seed", None)
+    return patterns[0]
+
+
 def _broken(mutate):
     spec = copy.deepcopy(VALID)
     mutate(spec)
@@ -102,7 +122,7 @@ def test_missing_or_wrong_version(version):
     [
         (lambda s: s.update(extra=1), "spec: unknown keys ['extra']; valid keys are ['spyrite_spec', "),
         (lambda s: s["tilesets"]["terrain"].update(colour=1), "tilesets.terrain: unknown keys ['colour']; valid keys are ['image', "),
-        (lambda s: s["objects"]["room"].update(patterns=[]), "objects.room: unknown keys ['patterns']; valid keys are ['tileset', "),
+        (lambda s: s["objects"]["room"].update(bogus=[]), "objects.room: unknown keys ['bogus']; valid keys are ['tileset', "),
         (lambda s: s["objects"]["room"]["fills"][0].update(cell=[0, 0]), "objects.room.fills[0]: unknown keys ['cell']; valid keys are ['plane', "),
         (lambda s: s["objects"]["room"]["tiles"][0].update(cells=[0, 0]), "objects.room.tiles[0]: unknown keys ['cells']; valid keys are ['plane', "),
         (lambda s: s["tilesets"]["terrain"].pop("image"), "tilesets.terrain.image: required"),
@@ -127,6 +147,29 @@ def test_missing_or_wrong_version(version):
         (lambda s: s["objects"]["room"]["fills"][0].pop("tile"), "objects.room.fills[0].tile: required"),
         (lambda s: s["objects"]["room"]["fills"][0].update(cells=[[3, 3], [1, 1]]), "objects.room.fills[0].cells: the max corner [1, 1] must be >= the min corner [3, 3]"),
         (lambda s: s["objects"]["room"]["fills"][0].update(cells=[[0, 0]]), "objects.room.fills[0].cells: must be [[min_x, min_y], [max_x, max_y]]"),
+        (lambda s: s["objects"]["room"].update(patterns={"a": 1}), "objects.room.patterns: must be a list of mappings"),
+        (lambda s: _pattern(s, kind="nope"), "objects.room.patterns[0].kind: must be one of ['autotile', 'random', 'stamp']"),
+        (lambda s: _pattern(s, bogus=1), "objects.room.patterns[0]: unknown keys ['bogus']; valid keys are ['kind', 'tiles', 'weights', 'seed', 'plane', "),
+        (lambda s: _pattern(s).pop("seed"), "objects.room.patterns[0].seed: required, an integer"),
+        (lambda s: _pattern(s).update(seed=True), "objects.room.patterns[0].seed: required, an integer"),
+        (lambda s: _pattern(s).update(tiles=[]), "objects.room.patterns[0].tiles: must be a non-empty list of tiles"),
+        (lambda s: _pattern(s).update(tiles=["grass", 3]), "objects.room.patterns[0].tiles[1]: must be a tile name or [column, row]"),
+        (lambda s: _pattern(s).update(tiles=[{"tile": "grass", "x": 1}]), "objects.room.patterns[0].tiles[0]: unknown keys ['x']"),
+        (lambda s: _pattern(s).update(tiles=[{"rotation_deg": 90}]), "objects.room.patterns[0].tiles[0].tile: required"),
+        (lambda s: _pattern(s).update(tiles=[{"tile": "grass", "rotation_deg": 45}]), "objects.room.patterns[0].tiles[0].rotation_deg: must be one of"),
+        (lambda s: _pattern(s).update(weights=[1]), "objects.room.patterns[0].weights: must be a list of 2 numbers > 0"),
+        (lambda s: _pattern(s).update(weights=[1, 0]), "objects.room.patterns[0].weights: must be a list of 2 numbers > 0"),
+        (lambda s: _pattern(s).pop("cells"), "objects.room.patterns[0]: needs exactly one of cells"),
+        (lambda s: _pattern(s).update(cell_min_xy=[0, 0], cell_max_xy=[1, 1]), "objects.room.patterns[0]: needs exactly one of cells"),
+        (lambda s: _pattern(s).update(cells=[]), "objects.room.patterns[0].cells: must be a non-empty list of [x, y]"),
+        (lambda s: _pattern(s).update(cells=[[0]]), "objects.room.patterns[0].cells[0]: must be a list of 2 whole-number integers"),
+        (lambda s: _pattern(s, kind="stamp", rows=[["grass"], ["a", "b"]]), "objects.room.patterns[0].rows: must be rectangular"),
+        (lambda s: _pattern(s, kind="stamp", rows=[]), "objects.room.patterns[0].rows: must be a non-empty list"),
+        (lambda s: _pattern(s, kind="autotile", mask="corners"), "objects.room.patterns[0].mask: must be 'edges4'"),
+        (lambda s: _pattern(s, kind="autotile", mask="edges4", tiles={"0": "grass"}), "objects.room.patterns[0].tiles: missing autotile keys ['1', '2', '3',"),
+        (lambda s: _pattern(s, kind="autotile", mask="edges4", tiles=_autotile(extra=True)), "objects.room.patterns[0].tiles: unknown keys ['16']"),
+        (lambda s: (_pattern(s).pop("cells"), _pattern(s).update(cell_min_xy=[2, 2], cell_max_xy=[1, 1])), "objects.room.patterns[0].cell_max_xy: the max corner [1, 1] must be >="),
+        (lambda s: _pattern(s).update(layer="TOP"), "objects.room.patterns[0].layer: must be one of"),
     ],
 )
 def test_error_messages_start_with_the_dotted_path(mutate, prefix):
@@ -139,3 +182,29 @@ def test_unknown_key_message_lists_every_valid_key():
         "objects.room.tiles[0]: unknown keys ['bogus']; valid keys are ['plane', 'plane_offset_m', 'cell', "
         "'tile', 'tile_span', 'rotation_deg', 'flip_x', 'flip_y', 'layer']"
     )
+
+
+def test_patterns_normalise():
+    spec = copy.deepcopy(VALID)
+    spec["objects"]["room"]["patterns"] = [
+        {"kind": "random", "tiles": ["grass", [1, 0], {"tile": "stone", "rotation_deg": 90}], "weights": [1, 2, 3], "seed": 7,
+         "cell_min_xy": [0, 0], "cell_max_xy": [2, 1], "plane": "XZ", "plane_offset_m": 2, "layer": "DECAL"},
+        {"kind": "stamp", "rows": [["grass", "stone"]], "cells": [[1, 1], [0, 0]]},
+        {"kind": "autotile", "mask": "edges4", "tiles": _autotile(), "cell_min_xy": [0, 0], "cell_max_xy": [2, 2]},
+    ]
+    first, second, third = spec_module.validate_spec(spec)["objects"]["room"]["patterns"]
+    assert first["pattern"] == {
+        "kind": "random",
+        "tiles": [
+            "grass",
+            [1, 0],
+            {"tile": "stone", "rotation_deg": 90, "flip_x": False, "flip_y": False},
+        ],
+        "weights": [1.0, 2.0, 3.0],
+        "seed": 7,
+    }
+    assert (first["plane"], first["plane_offset_m"], first["layer"]) == ("XZ", 2.0, "DECAL")
+    assert first["cell_min_xy"] == [0, 0] and first["cell_max_xy"] == [2, 1] and "cells" not in first
+    assert second["cells"] == [[1, 1], [0, 0]] and second["plane"] == "XY" and second["layer"] == "BASE"
+    assert third["pattern"]["mask"] == "edges4" and sorted(third["pattern"]["tiles"], key=int) == [str(k) for k in range(16)]
+    assert spec_module.validate_spec(VALID)["objects"]["room"]["patterns"] == []

@@ -1630,6 +1630,19 @@ def _spec_placements(spec_object):
     for i, tile in enumerate(spec_object["tiles"]):
         placements.append({k: v for k, v in tile.items() if k != "cell_xy"} | {"cell_xy": tuple(tile["cell_xy"])})
         origins.append(f"tiles[{i}]")
+    for i, entry in enumerate(spec_object.get("patterns", ())):
+        try:
+            cells = _pattern_cells(entry.get("cell_min_xy"), entry.get("cell_max_xy"), entry.get("cells"))
+            assigned = _pattern_assign(entry["pattern"], cells)
+        except ValueError as error:
+            raise spyrite_spec.SpecError(f"patterns[{i}]: {error}") from None
+        for cell, tile in zip(cells, assigned):
+            placements.append(
+                {"cell_xy": cell, "tile": tile["tile"]}
+                | {k: tile[k] for k in ("rotation_deg", "flip_x", "flip_y")}
+                | {k: entry[k] for k in ("plane", "plane_offset_m", "layer")}
+            )
+            origins.append(f"patterns[{i}]")
     return placements, origins
 
 
@@ -1640,8 +1653,8 @@ def build_spec(spec_path):
     absolute). Steps: parse and validate the spec, create every tileset (:func:`create_tileset`, idempotent
     per image), resolve every tile name and check every placement against its tileset, and only then create
     each object (:func:`create_tile_object`) and apply, in one edit session per object, ``clear`` (delete all
-    its faces first), the ``fills`` (as :func:`fill_tiles`) and the ``tiles`` (as :func:`place_tiles`), in
-    that order. A failure while placing rolls that object back to what it was; tilesets and objects built
+    its faces first), the ``fills`` (as :func:`fill_tiles`), the ``tiles`` (as :func:`place_tiles`) and the ``patterns`` (as
+    :func:`fill_pattern`), in that order. A failure while placing rolls that object back to what it was; tilesets and objects built
     before the failure stay. Errors are ``ValueError`` (``SpecError`` for spec problems, starting with the
     dotted path of the bad value, e.g. ``objects.room.tiles[3].tile: ...``).
 
@@ -1673,7 +1686,10 @@ def build_spec(spec_path):
     for name, entry in spec["objects"].items():
         material_name = tileset_reports[entry["tileset"]]["material_name"]
         tileset = _find_tileset(material_name)
-        placements, origins = _spec_placements(entry)
+        try:
+            placements, origins = _spec_placements(entry)
+        except spyrite_spec.SpecError as error:
+            raise spyrite_spec.SpecError(f"objects.{name}.{error}") from None
         normalized = []
         for index, placement in enumerate(placements):
             try:

@@ -4,6 +4,7 @@ Fixture: tests/fixtures/tiles_16px.png (64x64, 4x4 tiles of 16 px).
 """
 
 import importlib
+import shutil
 from pathlib import Path
 
 import bpy
@@ -145,3 +146,67 @@ def test_errors_leave_the_object_untouched(board, pattern, kwargs, message):
     with pytest.raises(ValueError, match=message):
         _fill(pattern, **kwargs)
     assert api.describe_tile_object(OBJECT)["face_count"] == 0
+
+
+SPEC = f"""\
+spyrite_spec: 1
+pixels_per_unit: 16
+tilesets:
+  {TILESET}:
+    image: ./tiles.png
+    tile_size_px: [16, 16]
+objects:
+  {OBJECT}:
+    tileset: {TILESET}
+    fills:
+      - {{plane: XY, cells: [[0, 0], [0, 0]], tile: grass}}
+    patterns:
+      - kind: random
+        tiles: [grass, stone]
+        seed: 7
+        cell_min_xy: [0, 0]
+        cell_max_xy: [3, 3]
+      - kind: stamp
+        rows:
+          - [grass, {{tile: stone, rotation_deg: 90}}]
+          - [water, grass]
+        plane: XZ
+        plane_offset_m: 2
+        cells: [[0, 0], [1, 0], [0, 1], [1, 1]]
+"""
+
+
+def _spec_file(tmp_path, text):
+    shutil.copy(FIXTURE_IMAGE, tmp_path / "tiles.png")
+    shutil.copy(FIXTURE_IMAGE.with_name("tiles_16px.spyrite.yaml"), tmp_path / "tiles.spyrite.yaml")
+    path = tmp_path / "scene.spyrite.yaml"
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_spec_patterns_build_after_tiles(tmp_path):
+    report = api.build_spec(_spec_file(tmp_path, SPEC))
+    assert report["objects"][0]["face_count"] == 16 + 4
+    faces = api.describe_tile_object(OBJECT, max_faces=100)["faces"]
+    floor = {tuple(f["cell_xy"]): f["tile"] for f in faces if f["plane"] == "XY"}
+    again = {}
+    rng_pattern = {"kind": "random", "tiles": ["grass", "stone"], "seed": 7}
+    check = api.fill_pattern(OBJECT, TILESET, rng_pattern, cell_min_xy=[0, 0], cell_max_xy=[3, 3])
+    for a in check["assignments"]:
+        again[tuple(a["cell_xy"])] = a["tile_xy"]
+    assert check["remapped"] == 16 and check["built"] == 0
+    assert {k: [0, 0] if v == "grass" else [1, 0] for k, v in floor.items()} == {k: v for k, v in again.items()}
+    wall = {tuple(f["cell_xy"]): f for f in faces if f["plane"] == "XZ"}
+    assert wall[(0, 1)]["tile"] == "grass" and wall[(1, 1)]["tile"] == "stone" and wall[(1, 1)]["rotation_deg"] == 90
+    assert wall[(0, 0)]["tile"] == "water" and wall[(1, 0)]["tile"] == "grass"
+    assert all(f["plane_offset_m"] == 2.0 for f in wall.values())
+
+
+def test_spec_pattern_errors_name_the_object(tmp_path):
+    bad = SPEC.replace("seed: 7", "seed: 7\n        weights: [1]")
+    with pytest.raises(ValueError, match=rf"objects.{OBJECT}.patterns\[0\].weights: must be a list of 2"):
+        api.build_spec(_spec_file(tmp_path, bad))
+    bad = SPEC.replace("[grass, stone]", "[grass, lava]")
+    with pytest.raises(ValueError, match=rf"objects.{OBJECT}.patterns\[0\]\.tile: unknown tile name .lava."):
+        api.build_spec(_spec_file(tmp_path, bad))
+    assert bpy.data.objects.get(OBJECT) is None
