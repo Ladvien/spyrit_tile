@@ -36,7 +36,7 @@ blended: `/Users/ladvien/blended`. Blender: `/Applications/Blender.app/Contents/
 
 | # | Gate | Command (in `~/spyrite_tile`) | Proves | Needs |
 |---|---|---|---|---|
-| 1 | static | `uvx pyflakes addon/spyrite_tile packages scripts \| grep 'undefined name'` (Blender's `prop : EnumProperty(...)` annotations make pyflakes print hundreds of 'forward annotation' errors; only undefined names matter; baseline: 1, `HIDDEN` in sprytile_utils.py) | no undefined names | nothing |
+| 1 | static | `uvx pyflakes addon/spyrite_tile packages scripts \| grep ': undefined name'` (Blender's `prop : EnumProperty(...)` annotations make pyflakes print hundreds of 'forward annotation' errors; only undefined names matter; baseline: 2 lines, `HIDDEN` at sprytile_utils.py:1024,1073, from a star import) | no undefined names | nothing |
 | 2 | pure | `make test-pure` | generator, normalize, backends (mocked HTTP) | `.venv` |
 | 3 | headless Blender | `make blender-test-deps` once, then `make test-blender` | API numbers (`test_api.py`), ops vs api (`test_ops.py`), relations (`test_metamorphic.py`), registration | nothing (isolated) |
 | 4 | live MCP | `make test-live` (`ARGS=--reload-api` after `api.py` edits) | the agent path in the user's open Blender: MCP -> blended -> plugin -> api | user's Blender running with mcp add-on |
