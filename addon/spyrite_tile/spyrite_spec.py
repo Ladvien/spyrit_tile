@@ -104,7 +104,15 @@ ROTATIONS_DEG = (0, 90, 180, 270)
 LAYER_NAMES = ("BASE", "DECAL")
 _TOP_KEYS = ("spyrite_spec", "pixels_per_unit", "tilesets", "objects")
 _TILESET_KEYS = ("image", "tile_size_px", "padding_px", "margin_px")
-_OBJECT_KEYS = ("tileset", "pixels_per_unit", "clear", "fills", "tiles")
+_OBJECT_KEYS = ("tileset", "pixels_per_unit", "clear", "fills", "tiles", "patterns")
+_PATTERN_KINDS = {
+    "random": ("tiles", "weights", "seed"),
+    "stamp": ("rows",),
+    "autotile": ("mask", "tiles"),
+}
+_PATTERN_PLACE_KEYS = ("plane", "plane_offset_m", "layer", "cells", "cell_min_xy", "cell_max_xy")
+_PATTERN_TILE_OBJECT_KEYS = ("tile", "rotation_deg", "flip_x", "flip_y")
+AUTOTILE_KEYS = tuple(str(k) for k in range(16))
 _FILL_KEYS = ("plane", "plane_offset_m", "cells", "tile", "rotation_deg", "flip_x", "flip_y", "layer")
 _TILE_KEYS_IN_SPEC = (
     "plane", "plane_offset_m", "cell", "tile", "tile_span", "rotation_deg", "flip_x", "flip_y", "layer",
@@ -207,7 +215,8 @@ def _entries(path, value, valid, build):
         here = f"{path}[{i}]"
         if not isinstance(entry, dict):
             raise SpecError(f"{here}: must be a mapping with keys {list(valid)}, got {entry!r}")
-        _unknown_keys(here, entry, valid)
+        if valid is not None:
+            _unknown_keys(here, entry, valid)
         out.append(build(here, entry))
     return out
 
@@ -243,13 +252,106 @@ def _placement(path, entry):
     return normalized
 
 
+def _pattern_tile(path, value):
+    """A tile of a pattern: a name, ``[column, row]`` or ``{tile, rotation_deg, flip_x, flip_y}``."""
+    if not isinstance(value, dict):
+        return _tile(path, value)
+    _unknown_keys(path, value, _PATTERN_TILE_OBJECT_KEYS)
+    if "tile" not in value:
+        raise SpecError(f"{path}.tile: required")
+    oriented = _orientation(path, {k: value[k] for k in ("rotation_deg", "flip_x", "flip_y") if k in value})
+    return {
+        "tile": _tile(f"{path}.tile", value["tile"]),
+        "rotation_deg": oriented["rotation_deg"],
+        "flip_x": oriented["flip_x"],
+        "flip_y": oriented["flip_y"],
+    }
+
+
+def _tile_list(path, value):
+    if not isinstance(value, list) or not value:
+        raise SpecError(f"{path}: must be a non-empty list of tiles, got {value!r}")
+    return [_pattern_tile(f"{path}[{i}]", t) for i, t in enumerate(value)]
+
+
+def _pattern(path, entry):
+    kind = entry.get("kind")
+    if kind not in _PATTERN_KINDS:
+        raise SpecError(f"{path}.kind: must be one of {sorted(_PATTERN_KINDS)}, got {kind!r}")
+    valid = ("kind",) + _PATTERN_KINDS[kind] + _PATTERN_PLACE_KEYS
+    _unknown_keys(path, entry, valid)
+    pattern = {"kind": kind}
+    if kind == "random":
+        pattern["tiles"] = _tile_list(f"{path}.tiles", entry.get("tiles"))
+        if entry.get("weights") is not None:
+            weights = entry["weights"]
+            if (
+                not isinstance(weights, list)
+                or len(weights) != len(pattern["tiles"])
+                or any(isinstance(w, bool) or not isinstance(w, (int, float)) or not w > 0 for w in weights)
+            ):
+                raise SpecError(
+                    f"{path}.weights: must be a list of {len(pattern['tiles'])} numbers > 0 (one per tile), got {weights!r}"
+                )
+            pattern["weights"] = [float(w) for w in weights]
+        seed = entry.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise SpecError(f"{path}.seed: required, an integer (the same seed gives the same fill), got {seed!r}")
+        pattern["seed"] = seed
+    elif kind == "stamp":
+        rows = entry.get("rows")
+        if not isinstance(rows, list) or not rows or not all(isinstance(r, list) and r for r in rows):
+            raise SpecError(f"{path}.rows: must be a non-empty list of non-empty lists of tiles (rows[0] is the top row), got {rows!r}")
+        if any(len(r) != len(rows[0]) for r in rows):
+            raise SpecError(f"{path}.rows: must be rectangular; row lengths are {[len(r) for r in rows]}")
+        pattern["rows"] = [[_pattern_tile(f"{path}.rows[{j}][{i}]", t) for i, t in enumerate(r)] for j, r in enumerate(rows)]
+    else:
+        if entry.get("mask") != "edges4":
+            raise SpecError(f"{path}.mask: must be 'edges4', got {entry.get('mask')!r}")
+        tiles = entry.get("tiles")
+        if not isinstance(tiles, dict):
+            raise SpecError(f"{path}.tiles: must be a mapping with the keys '0'..'15', got {tiles!r}")
+        keyed = {str(k): v for k, v in tiles.items()}
+        missing = [k for k in AUTOTILE_KEYS if k not in keyed]
+        if missing:
+            raise SpecError(f"{path}.tiles: missing autotile keys {missing}; all of '0'..'15' are required")
+        extra = sorted(set(keyed) - set(AUTOTILE_KEYS))
+        if extra:
+            raise SpecError(f"{path}.tiles: unknown keys {extra}; valid keys are '0'..'15'")
+        pattern["mask"] = "edges4"
+        pattern["tiles"] = {k: _pattern_tile(f"{path}.tiles[{k!r}]", keyed[k]) for k in AUTOTILE_KEYS}
+    normalized = _orientation(path, {k: entry[k] for k in ("plane", "plane_offset_m", "layer") if k in entry})
+    place = {"plane": normalized["plane"], "plane_offset_m": normalized["plane_offset_m"], "layer": normalized["layer"]}
+    has_rect = "cell_min_xy" in entry or "cell_max_xy" in entry
+    if has_rect == ("cells" in entry):
+        raise SpecError(f"{path}: needs exactly one of cells (a list of [x, y]) or cell_min_xy with cell_max_xy")
+    if has_rect:
+        for key in ("cell_min_xy", "cell_max_xy"):
+            if key not in entry:
+                raise SpecError(f"{path}.{key}: required together with the other corner")
+        low = _cell(f"{path}.cell_min_xy", entry["cell_min_xy"])
+        high = _cell(f"{path}.cell_max_xy", entry["cell_max_xy"])
+        if high[0] < low[0] or high[1] < low[1]:
+            raise SpecError(f"{path}.cell_max_xy: the max corner {high} must be >= the min corner {low} in both components")
+        place.update({"cell_min_xy": low, "cell_max_xy": high})
+    else:
+        cells = entry["cells"]
+        if not isinstance(cells, list) or not cells:
+            raise SpecError(f"{path}.cells: must be a non-empty list of [x, y], got {cells!r}")
+        place["cells"] = [_cell(f"{path}.cells[{i}]", c) for i, c in enumerate(cells)]
+    return {"pattern": pattern, **place}
+
+
 def validate_spec(spec):
     """Check a loaded spec and return it normalised: defaults filled, every value in its canonical type.
 
     The normalised spec is ``{"spyrite_spec": 1, "tilesets": {name: {image, tile_size_px, padding_px,
     margin_px}}, "objects": {name: {tileset, pixels_per_unit, clear, fills: [{plane, plane_offset_m,
     cell_min_xy, cell_max_xy, tile, rotation_deg, flip_x, flip_y, layer}], tiles: [{plane, plane_offset_m,
-    cell_xy, tile, tile_span, rotation_deg, flip_x, flip_y, layer}]}}}``. Object ``pixels_per_unit`` falls back
+    cell_xy, tile, tile_span, rotation_deg, flip_x, flip_y, layer}], patterns: [{pattern: {kind, ...}, plane,
+    plane_offset_m, layer, and cells or cell_min_xy + cell_max_xy}]}}}``. A spec ``patterns`` entry is flat:
+    ``{kind: random|stamp|autotile, <kind fields>, plane, plane_offset_m, layer, cells | cell_min_xy +
+    cell_max_xy}`` (see ``api.fill_pattern``). Object ``pixels_per_unit`` falls back
     to the top-level one. Tile names are only syntax-checked here; the tileset's sidecar resolves them when
     the spec is built. Raises ``SpecError`` with the dotted path of the first bad value.
     """
@@ -287,7 +389,7 @@ def validate_spec(spec):
         path = f"objects.{name}"
         if not isinstance(name, str) or not name:
             raise SpecError(f"objects: object names must be non-empty strings, got {name!r}")
-        _mapping(path, entry, "tileset, pixels_per_unit, clear, fills, tiles")
+        _mapping(path, entry, "tileset, pixels_per_unit, clear, fills, tiles, patterns")
         _unknown_keys(path, entry, _OBJECT_KEYS)
         if "tileset" not in entry:
             raise SpecError(f"{path}.tileset: required, one of {sorted(tilesets)}")
@@ -304,5 +406,6 @@ def validate_spec(spec):
             "clear": _bool(f"{path}.clear", entry.get("clear"), False),
             "fills": _entries(f"{path}.fills", entry.get("fills"), _FILL_KEYS, _fill),
             "tiles": _entries(f"{path}.tiles", entry.get("tiles"), _TILE_KEYS_IN_SPEC, _placement),
+            "patterns": _entries(f"{path}.patterns", entry.get("patterns"), None, _pattern),
         }
     return {"spyrite_spec": SPEC_VERSION, "tilesets": tilesets, "objects": objects}
