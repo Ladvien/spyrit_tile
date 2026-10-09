@@ -83,8 +83,15 @@ def test_create_tileset_reports_tile_names(named_tileset):
     }
 
 
-def test_tileset_without_sidecar_has_no_names(tmp_path):
-    report = api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))
+@pytest.fixture
+def plain_image(tmp_path):
+    image = tmp_path / "plain.png"
+    shutil.copy(FIXTURE_IMAGE, image)
+    return image
+
+
+def test_tileset_without_sidecar_has_no_names(plain_image):
+    report = api.create_tileset(TILESET, str(plain_image), (16, 16))
     assert report["tile_names"] == {}
 
 
@@ -160,10 +167,10 @@ def test_unknown_name_lists_the_known_names(named_tileset):
     )
 
 
-def test_name_without_sidecar_says_so(tmp_path):
-    api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))
+def test_name_without_sidecar_says_so(plain_image):
+    api.create_tileset(TILESET, str(plain_image), (16, 16))
     api.create_tile_object(OBJECT, TILESET, 16)
-    sidecar = str(FIXTURE_IMAGE.with_suffix(".spyrite.yaml"))
+    sidecar = str(plain_image.with_suffix(".spyrite.yaml"))
     with pytest.raises(ValueError) as error:
         api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile": "grass"}])
     assert str(error.value) == (

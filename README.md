@@ -43,8 +43,8 @@ Three pieces, all in this repository:
 
 | Piece | Where it runs | What it does |
 |---|---|---|
-| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene` |
-| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `tile_object_report`, `scene_report`, `set_pixel_art_view` |
+| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `build_spec`, `export_spec` |
+| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `tile_object_report`, `scene_report`, `set_pixel_art_view`, `build_spec`, `export_spec` |
 | `packages/spyrite_tile_gen` | on the host | MCP server `spyrite-tile-gen`: `generate_tile`, `generate_sprite`, `generate_tileset` (Retro Diffusion, paid, needs `RD_API_KEY`; or the local SDXL service), `normalize_image`, `compose_atlas`, `estimate_cost`, `list_backends` |
 | `services/pixel_server` | GPU host | FastAPI SDXL + pixel-art LoRA service behind the `local` backend (systemd user unit `spyrite-pixel.service`, port 8190) |
 
@@ -65,6 +65,29 @@ Then any tile argument (`tile` / `tile_xy` in placements, `fill_tiles`, `paint_f
 restricts where a name may be placed, and `tile_object_report` / `import_tileset` report the names.
 `compose_atlas(names=[...], planes_by_name={...})` writes the sidecar for you. The YAML parser is
 vendored (`addon/spyrite_tile/_vendor/yaml`, PyYAML 6.0.3, MIT) because Blender's Python has none.
+
+Specs: `build_spec(spec_path)` builds a whole scene from a YAML file and `export_spec(object_names, spec_path)`
+writes tile objects back to one (faces that are not whole-cell rectangles are listed, not written).
+Both paths are absolute; tileset `image` paths are relative to the spec. Schema (see
+`tests/fixtures/room.spyrite.yaml`, which builds a 50-face room with named tiles):
+
+```yaml
+spyrite_spec: 1
+pixels_per_unit: 16              # default for objects
+tilesets:
+  terrain: {image: ./tiles.png, tile_size_px: [16, 16]}   # padding_px / margin_px optional
+objects:
+  room:
+    tileset: terrain
+    clear: false                 # true deletes the object's faces first
+    fills:                       # each is fill_tiles; cells = [[min_x, min_y], [max_x, max_y]]
+      - {plane: XY, plane_offset_m: 0, cells: [[0, 0], [5, 5]], tile: grass}
+    tiles:                       # each is one placement; tile is a name or [col, row]
+      - {plane: XZ, plane_offset_m: 6, cell: [0, 0], tile: wall_top, rotation_deg: 90, layer: BASE}
+```
+
+Unknown keys are errors listing the valid ones; error messages start with the dotted path
+(`objects.room.tiles[3].tile: ...`). A failed object is rolled back; earlier tilesets and objects stay.
 
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and

@@ -249,7 +249,7 @@ def test_fill_remove_paint_and_report_match_api(tileset):
         assert face.cell_xy == tuple(api_face["cell_xy"])
         assert face.on_grid is api_face["on_grid"] is True
         assert face.tileset == api_face["tileset"] == TILESET_NAME
-        assert face.tile is api_face["tile"] is None
+        assert face.tile == api_face["tile"]
     painted = {face.index: face.tile_xy for face in reading.faces}
     assert painted[0] == painted[1] == (3, 3)
 
@@ -267,7 +267,8 @@ def test_scene_report_matches_api(tileset):
     assert (mine.columns, mine.rows) == (api_mine["columns"], api_mine["rows"]) == (COLUMNS, ROWS)
     assert mine.grid_id == api_mine["grid_id"] == tileset.grid_id
     assert mine.image_path == api_mine["image_path"]
-    assert mine.tile_names == api_mine["tile_names"] == {}
+    assert mine.tile_names == api_mine["tile_names"]
+    assert mine.tile_names["grass"] == {"xy": [0, 0], "planes": None, "tags": ["floor"]}
 
     obj = next(o for o in reading.tile_objects if o.object_name == OPS_OBJECT_NAME)
     api_obj = next(o for o in api_scene["tile_objects"] if o["object_name"] == OPS_OBJECT_NAME)
@@ -358,12 +359,52 @@ def test_rotation_deg_outside_the_four_quarter_turns_is_refused(rotation_deg):
         ops.paint_faces("any", "any", [0], (0, 0), rotation_deg=rotation_deg)
 
 
+def test_build_spec_and_export_spec_match_api(tmp_path):
+    import shutil
+
+    for suffix in (".png", ".spyrite.yaml"):
+        shutil.copy(FIXTURE_IMAGE.with_name("tiles_16px" + suffix), tmp_path / ("tiles" + suffix))
+    text = (
+        "spyrite_spec: 1\npixels_per_unit: 16\ntilesets:\n  {t}:\n    image: ./tiles.png\n    tile_size_px: [16, 16]\n"
+        "objects:\n  {o}:\n    tileset: {t}\n    fills:\n      - {{cells: [[0, 0], [2, 1]], tile: grass}}\n"
+        "    tiles:\n      - {{plane: XZ, cell: [0, 0], tile: wall_top, rotation_deg: 90}}\n"
+    )
+    ops_spec = tmp_path / "ops.spyrite.yaml"
+    ops_spec.write_text(text.format(t=TILESET_NAME, o=OPS_OBJECT_NAME), encoding="utf-8")
+    api_spec = tmp_path / "api.spyrite.yaml"
+    api_spec.write_text(text.format(t=TILESET_NAME + "_api", o=API_OBJECT_NAME), encoding="utf-8")
+    _remove_test_data()
+    try:
+        report = ops.build_spec(spec_path=ops_spec)
+        api_report = _api().build_spec(spec_path=str(api_spec))
+        assert report.spec_path == str(ops_spec)
+        assert report.tilesets[0].material_name == TILESET_NAME
+        assert report.tilesets[0].tile_names == api_report["tilesets"][0]["tile_names"]
+        assert report.tilesets[0].tile_names["wall_top"]["planes"] == ["XZ", "YZ"]
+        assert report.objects == (ops.SpecObjectReport(OPS_OBJECT_NAME, built=7, remapped=0, face_count=7),)
+        assert report.objects[0].face_count == api_report["objects"][0]["face_count"]
+        assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+
+        out = tmp_path / "exported.spyrite.yaml"
+        exported = ops.export_spec(objects=[OPS_OBJECT_NAME], spec_path=out)
+        api_exported = _api().export_spec([API_OBJECT_NAME], str(tmp_path / "api_exported.spyrite.yaml"))
+        assert exported == ops.SpecExportReport(str(out), objects=1, tiles=7, unexported_faces={})
+        assert (exported.objects, exported.tiles) == (api_exported["objects"], api_exported["tiles"])
+        # The api spec reuses the ops tileset (same image), so only the object name differs
+        assert out.read_text(encoding="utf-8").replace(OPS_OBJECT_NAME, "O") == (
+            (tmp_path / "api_exported.spyrite.yaml").read_text(encoding="utf-8").replace(API_OBJECT_NAME, "O")
+        )
+    finally:
+        _remove_test_data()
+
+
 def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     from blended.ops._contract import is_reads_only
 
     assert [name for name in ops.__all__ if is_reads_only(getattr(ops, name))] == [
         "tile_object_report",
         "scene_report",
+        "export_spec",
     ]
 
 

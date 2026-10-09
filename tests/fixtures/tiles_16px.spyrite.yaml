@@ -1,0 +1,6 @@
+spyrite_tileset: 1
+tiles:
+  grass: {xy: [0, 0], tags: [floor]}
+  stone: {xy: [1, 0]}
+  wall_top: {xy: [2, 0], planes: [XZ, YZ], tags: [wall]}
+  water: {xy: [0, 1], tags: [floor]}

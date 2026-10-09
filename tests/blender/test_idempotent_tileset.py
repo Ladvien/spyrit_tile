@@ -47,12 +47,15 @@ def test_same_image_and_layout_reuses_the_first_material():
     api.create_tile_object(PREFIX + "obj", second["material_name"], 16)
 
 
-def test_different_layout_gets_its_own_material():
-    api.create_tileset(PREFIX + "a", str(FIXTURE_IMAGE), (16, 16))
-    other = api.create_tileset(PREFIX + "b", str(FIXTURE_IMAGE), (32, 32))
+def test_different_layout_gets_its_own_material(tmp_path):
+    # a copy without the fixture's tile-name sidecar, which only fits 16 px tiles
+    image = tmp_path / "tiles.png"
+    image.write_bytes(FIXTURE_IMAGE.read_bytes())
+    api.create_tileset(PREFIX + "a", str(image), (16, 16))
+    other = api.create_tileset(PREFIX + "b", str(image), (32, 32))
     assert other["reused_material"] is None
     assert bpy.data.materials.get(PREFIX + "b") is not None
-    padded = api.create_tileset(PREFIX + "c", str(FIXTURE_IMAGE), (14, 14), padding_px=(1, 1))
+    padded = api.create_tileset(PREFIX + "c", str(image), (14, 14), padding_px=(1, 1))
     assert padded["reused_material"] is None
     assert [e for e in _entries() if e.startswith(PREFIX)] == [PREFIX + "a", PREFIX + "b", PREFIX + "c"]
 

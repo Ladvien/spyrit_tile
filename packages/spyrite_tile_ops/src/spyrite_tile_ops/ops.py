@@ -51,6 +51,8 @@ __all__ = [
     "tile_object_report",
     "scene_report",
     "set_pixel_art_view",
+    "build_spec",
+    "export_spec",
 ]
 
 
@@ -258,6 +260,35 @@ def _edit_report(result: dict) -> TileEditReport:
         removed=int(result.get("removed", 0)),
         painted=int(result.get("painted", 0)),
     )
+
+
+@dataclass(frozen=True)
+class SpecObjectReport:
+    """One object a spec built: faces newly built, faces remapped in place, faces now on the object."""
+
+    object_name: str
+    built: int
+    remapped: int
+    face_count: int
+
+
+@dataclass(frozen=True)
+class SpecBuildReport:
+    """What build_spec made: the spec file, one report per declared tileset and one per object."""
+
+    spec_path: str
+    tilesets: tuple[TilesetReport, ...]
+    objects: tuple[SpecObjectReport, ...]
+
+
+@dataclass(frozen=True)
+class SpecExportReport:
+    """What export_spec wrote; `unexported_faces` maps object name to the face indices that were left out."""
+
+    spec_path: str
+    objects: int
+    tiles: int
+    unexported_faces: dict[str, tuple[int, ...]] = field(default_factory=dict)
 
 
 # --- ops -------------------------------------------------------------------
@@ -477,4 +508,55 @@ def set_pixel_art_view() -> PixelArtViewReport:
         render_aa=result["render_aa"],
         view_transform=result["view_transform"],
         viewports_textured=result["viewports_textured"],
+    )
+
+
+def build_spec(spec_path: Path) -> SpecBuildReport:
+    """Build a scene from an absolute-path YAML spec: tilesets, objects, fills and tiles (names allowed).
+
+    Image paths in the spec are relative to the spec file. An object that fails to build is rolled back;
+    tilesets and objects built before it stay. See tests/fixtures/room.spyrite.yaml for an example.
+    """
+    result = _addon_api().build_spec(spec_path=str(spec_path))
+    return SpecBuildReport(
+        spec_path=result["spec_path"],
+        tilesets=tuple(
+            TilesetReport(
+                material_name=t["material_name"],
+                image_name=t["image_name"],
+                image_size_px=_pair(t["image_size_px"]),
+                tile_size_px=_pair(t["tile_size_px"]),
+                columns=int(t["columns"]),
+                rows=int(t["rows"]),
+                grid_id=int(t["grid_id"]),
+                reused_material=t["reused_material"],
+                tile_names=dict(t["tile_names"]),
+            )
+            for t in result["tilesets"]
+        ),
+        objects=tuple(
+            SpecObjectReport(
+                object_name=o["object_name"],
+                built=int(o["built"]),
+                remapped=int(o["remapped"]),
+                face_count=int(o["face_count"]),
+            )
+            for o in result["objects"]
+        ),
+    )
+
+
+@op(reads_only=True)
+def export_spec(objects: list[str], spec_path: Path) -> SpecExportReport:
+    """Write the tile objects named in `objects` as a YAML spec at an absolute path that build_spec rebuilds.
+
+    One `tiles` entry per whole-cell face; faces that placements cannot rebuild (hand modelled, backwards,
+    untextured) are left out and listed in `unexported_faces`. Writes a file; the scene is not changed.
+    """
+    result = _addon_api().export_spec(object_names=list(objects), spec_path=str(spec_path))
+    return SpecExportReport(
+        spec_path=result["spec_path"],
+        objects=int(result["objects"]),
+        tiles=int(result["tiles"]),
+        unexported_faces={name: tuple(int(i) for i in faces) for name, faces in result["unexported_faces"].items()},
     )
