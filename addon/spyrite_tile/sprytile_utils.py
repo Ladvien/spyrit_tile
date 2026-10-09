@@ -624,7 +624,7 @@ def label_wrap(col, text, area="VIEW_3D", region_type="TOOL_PROPS", tab_str="   
 
 class UTIL_OP_SprytileAxisUpdate(bpy.types.Operator):
     bl_idname = "sprytile.axis_update"
-    bl_label = "Update Sprytile Axis"
+    bl_label = "Update Spyrite Tile Axis"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -807,7 +807,7 @@ class UTIL_OP_SprytileGridCycle(bpy.types.Operator):
 
 class UTIL_OP_SprytileStartTool(bpy.types.Operator):
     bl_idname = "sprytile.start_tool"
-    bl_label = "Start Sprytile Paint"
+    bl_label = "Start Spyrite Tile Paint"
 
     mode: bpy.props.IntProperty(default=3)
 
@@ -1219,7 +1219,7 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
 
 class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
     bl_idname = "sprytile.build_grid_list"
-    bl_label = "Sprytile Build Grid List"
+    bl_label = "Spyrite Tile Build Grid List"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -1252,7 +1252,7 @@ class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
 
 class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
     bl_idname = "sprytile.rotate_left"
-    bl_label = "Rotate Sprytile Left"
+    bl_label = "Rotate Spyrite Tile Left"
     bl_description = "Rotate the tile 90 degrees counter clockwise"
 
     def execute(self, context):
@@ -1269,7 +1269,7 @@ class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
 
 class UTIL_OP_SprytileRotateRight(bpy.types.Operator):
     bl_idname = "sprytile.rotate_right"
-    bl_label = "Rotate Sprytile Right"
+    bl_label = "Rotate Spyrite Tile Right"
     bl_description = "Rotate the tile 90 degrees clockwise"
 
     def execute(self, context):
@@ -1357,7 +1357,7 @@ class UTIL_OP_SprytileReloadImagesAuto(bpy.types.Operator):
 
 class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
     bl_idname = "sprytile.make_double_sided"
-    bl_label = "Make Double Sided (Sprytile)"
+    bl_label = "Make Double Sided (Spyrite Tile)"
     bl_description = "Duplicate selected faces and flip normals"
 
     def execute(self, context):
@@ -1414,7 +1414,7 @@ class UTIL_OP_SprytileSetupGrid(bpy.types.Operator):
 
 class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
     bl_idname = "sprytile.translate_grid"
-    bl_label = "Pixel Translate (Sprytile)"
+    bl_label = "Pixel Translate (Spyrite Tile)"
 
     # Draw handlers outlive the addon module, keep a class level reference so
     # unregister() can drop one that is still installed
@@ -1610,7 +1610,7 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
 
 class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
     bl_idname = "sprytile.snap_cursor"
-    bl_label = "Snap Cursor (Sprytile)"
+    bl_label = "Snap Cursor (Spyrite Tile)"
 
     def modal(self, context, event):
         # Leaving edit mode pulls the mesh out from under the raycast
@@ -1745,7 +1745,7 @@ class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
 
 class UTIL_OP_SprytileTilePicker(bpy.types.Operator):
     bl_idname = "sprytile.tile_picker"
-    bl_label = "Tile Picker (Sprytile)"
+    bl_label = "Tile Picker (Spyrite Tile)"
 
     def modal(self, context, event):
         if not event.alt:
@@ -1844,7 +1844,7 @@ class UTIL_OP_SprytileTilePicker(bpy.types.Operator):
 
 class UTIL_OP_SprytileSetNormal(bpy.types.Operator):
     bl_idname = "sprytile.set_normal"
-    bl_label = "Set Normal (Sprytile)"
+    bl_label = "Set Normal (Spyrite Tile)"
 
     def modal(self, context, event):
         sprytile_preview.clear_preview_data()
@@ -1899,7 +1899,7 @@ class UTIL_OP_SprytileSetNormal(bpy.types.Operator):
 
 class UTIL_OP_SprytileResetData(bpy.types.Operator):
     bl_idname = "sprytile.reset_sprytile"
-    bl_label = "Reset Sprytile"
+    bl_label = "Reset Spyrite Tile"
     bl_description = "In case sprytile breaks…"
 
     def invoke(self, context, event):
@@ -1927,8 +1927,8 @@ class UTIL_OP_SprytileFlipYToggle(bpy.types.Operator):
 
 class VIEW3D_MT_SprytileObjectDropDown(bpy.types.Menu):
     bl_idname = 'VIEW3D_MT_SprytileObjectDropDown'
-    bl_label = "Sprytile Utilites"
-    bl_description = "Sprytile helper functions"
+    bl_label = "Spyrite Tile Utilites"
+    bl_description = "Spyrite Tile helper functions"
 
     def draw(self, context):
         layout = self.layout
@@ -1946,11 +1946,11 @@ class VIEW3D_MT_SprytileObjectDropDown(bpy.types.Menu):
 
 
 class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
-    bl_label = "Sprytile Tools"
+    bl_label = "Spyrite Tile Tools"
     bl_idname = "VIEW3D_PT_SprytileObjectPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Sprytile"
+    bl_category = "Spyrite Tile"
 
     @classmethod
     def poll(cls, context):
@@ -1963,7 +1963,7 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
 
         if hasattr(context.scene, "sprytile_data") is False:
             box = layout.box()
-            box.label(text="Sprytile Data Empty")
+            box.label(text="Spyrite Tile Data Empty")
             box.operator("sprytile.props_setup")
             return
 
@@ -1982,7 +1982,7 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
             box.operator("sprytile.tileset_load")
             box.operator("sprytile.tileset_new")
         else:
-            box.label(text="Select a mesh object to use Sprytile")
+            box.label(text="Select a mesh object to use Spyrite Tile")
 
         layout.separator()
         help_text = "Enter edit mode to use Paint Tools"
@@ -2003,8 +2003,8 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
 
 class VIEW3D_MT_SprytileWorkDropDown(bpy.types.Menu):
     bl_idname = 'VIEW3D_MT_SprytileWorkDropDown'
-    bl_label = "Sprytile Utilites"
-    bl_description = "Sprytile helper functions"
+    bl_label = "Spyrite Tile Utilites"
+    bl_description = "Spyrite Tile helper functions"
 
     def draw(self, context):
         layout = self.layout
@@ -2028,7 +2028,7 @@ class VIEW3D_PT_SprytileLayerPanel(bpy.types.Panel):
     bl_idname = "VIEW3D_PT_SprytileLayerPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Sprytile"
+    bl_category = "Spyrite Tile"
     bl_options = {'DEFAULT_CLOSED'}
 
     @classmethod
@@ -2056,7 +2056,7 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
     bl_idname = "VIEW3D_PT_SprytileWorkflowPanel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Sprytile"
+    bl_category = "Spyrite Tile"
 
     @classmethod
     def poll(cls, context):
@@ -2068,7 +2068,7 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
 
         if hasattr(context.scene, "sprytile_data") is False:
             box = layout.box()
-            box.label(text="Sprytile Data Empty")
+            box.label(text="Spyrite Tile Data Empty")
             box.operator("sprytile.props_setup")
             return
 

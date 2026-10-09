@@ -70,7 +70,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
             ("SET_NORMAL", "Set Normal", "Select a normal to use for face creation", 2),
             ("FILL", "Fill", "Fill the work plane cursor", 4)
         ],
-        name="Sprytile Paint Mode",
+        name="Spyrite Tile Paint Mode",
         description="Paint mode",
         default='MAKE_FACE'
     )
@@ -143,14 +143,14 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
 
     paint_normal_vector : FloatVectorProperty(
         name="Srpytile Last Paint Normal",
-        description="Last saved painting normal used by Sprytile",
+        description="Last saved painting normal used by Spyrite Tile",
         subtype='DIRECTION',
         default=(0.0, 0.0, 1.0)
     )
 
     paint_up_vector : FloatVectorProperty(
-        name="Sprytile Last Paint Up Vector",
-        description="Last saved painting up vector used by Sprytile",
+        name="Spyrite Tile Last Paint Up Vector",
+        description="Last saved painting up vector used by Spyrite Tile",
         subtype='DIRECTION',
         default=(0.0, 1.0, 0.0)
     )
@@ -183,7 +183,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
             ('GRID', "Grid", "Snap cursor to grid", "SNAP_VERTEX", 2)
         ],
         name="Cursor snap mode",
-        description="Sprytile cursor snap mode"
+        description="Spyrite Tile cursor snap mode"
     )
 
     cursor_flow : BoolProperty(
@@ -352,7 +352,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
 
     allow_backface: bpy.props.BoolProperty(
         name="Backface",
-        description="Should Sprytile work on backfaces",
+        description="Should Spyrite Tile work on backfaces",
         default=False,
     )
 
@@ -612,7 +612,7 @@ class SprytileGridList(bpy.types.PropertyGroup):
 
 class PROP_OP_SprytilePropsSetup(bpy.types.Operator):
     bl_idname = "sprytile.props_setup"
-    bl_label = "Setup Sprytile data"
+    bl_label = "Setup Spyrite Tile data"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -639,8 +639,8 @@ class PROP_OP_SprytilePropsSetup(bpy.types.Operator):
 
 class PROP_OP_SprytilePropsTeardown(bpy.types.Operator):
     bl_idname = "sprytile.props_teardown"
-    bl_label = "Remove Sprytile data"
-    bl_description = "WARNING: This will clear all Sprytile data, tile grids will be lost. Continue?"
+    bl_label = "Remove Spyrite Tile data"
+    bl_description = "WARNING: This will clear all Spyrite Tile data, tile grids will be lost. Continue?"
 
     @classmethod
     def poll(cls, context):
@@ -696,7 +696,7 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
 
     auto_adjust_viewport_shading: bpy.props.BoolProperty(
         name="Automatically switch viewport to Material Preview mode",
-        description="If enabled, viewport shading mode will change to Material Preview while using Sprytile tools",
+        description="If enabled, viewport shading mode will change to Material Preview while using Spyrite Tile tools",
         default=True,
     )
 
@@ -851,7 +851,7 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
         split = row.split(factor=size_left_col)
 
         col = split.column()
-        col.label(text="On Sprytile Edit:")
+        col.label(text="On Spyrite Tile Edit:")
 
         col = split.column()
         col.prop(self, "auto_adjust_viewport_shading")
@@ -901,7 +901,7 @@ def tool_icon(name):
 
 class SprytileToolBuild(SprytileWorkSpaceTool):
     bl_idname = "sprytile.tool_build"
-    bl_label = "Sprytile Build"
+    bl_label = "Spyrite Tile Build"
     bl_description = "Make new tiles"
     bl_icon = tool_icon("sprytile.build_tool")
     bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['MAKE_FACE']
@@ -910,7 +910,7 @@ class SprytileToolBuild(SprytileWorkSpaceTool):
 
 class SprytileToolPaint(SprytileWorkSpaceTool):
     bl_idname = "sprytile.tool_paint"
-    bl_label = "Sprytile Paint"
+    bl_label = "Spyrite Tile Paint"
     bl_description = "Paint existing tiles/faces"
     bl_icon = tool_icon("sprytile.paint_tool")
     bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['PAINT']
@@ -919,7 +919,7 @@ class SprytileToolPaint(SprytileWorkSpaceTool):
 
 class SprytileToolFill(SprytileWorkSpaceTool):
     bl_idname = "sprytile.tool_fill"
-    bl_label = "Sprytile Fill"
+    bl_label = "Spyrite Tile Fill"
     bl_description = "Fill existing tiles/faces"
     bl_icon = tool_icon("sprytile.fill_tool")
     bl_keymap = sprytile_modal.VIEW3D_OP_SprytileModalTool.tool_keymaps['FILL']
