@@ -94,7 +94,7 @@ objects:
 ```
 
 Unknown keys are errors listing the valid ones; error messages start with the dotted path
-(`objects.room.tiles[3].tile: ...`). A failed object is rolled back; earlier tilesets and objects stay.
+(`objects.room.tiles[3].tile: ...`). A failed object is restored (faces, pixel density, grid, material slots; a new object is removed); earlier tilesets and objects stay.
 
 Composites: `build_room(size_cells=(w, d, h), floor_tile, wall_tile, walls=("back", "left"), ceiling_tile=...)` builds a
 floor, a back wall (XZ, normal -Y) and a left wall (YZ, normal +X) and an optional ceiling in one atomic call;

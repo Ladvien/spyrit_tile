@@ -916,7 +916,7 @@ def set_pixel_art_view() -> PixelArtViewReport:
 def build_spec(spec_path: Path) -> SpecBuildReport:
     """Build a scene from an absolute-path YAML spec: tilesets, objects, fills and tiles (names allowed).
 
-    Image paths in the spec are relative to the spec file. An object that fails to build is rolled back;
+    Image paths in the spec are relative to the spec file. An object that fails to build is restored (a new one removed);
     tilesets and objects built before it stay. See tests/fixtures/room.spyrite.yaml for an example.
     """
     result = _addon_api().build_spec(spec_path=str(spec_path))

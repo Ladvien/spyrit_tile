@@ -796,6 +796,14 @@ def _normalize_placement(index, placement, tileset):
     return normalized
 
 
+class PlacementError(RuntimeError):
+    """A placement that passed validation but could not be built; ``placement_index`` is its position in the call."""
+
+    def __init__(self, message, placement_index):
+        super().__init__(message)
+        self.placement_index = placement_index
+
+
 def _apply_placements(obj, tileset, placements, clear=False, outcomes=None):
     scene = bpy.context.scene
     ppu = _object_pixels_per_unit(obj, scene)
@@ -859,14 +867,15 @@ def _apply_placements(obj, tileset, placements, clear=False, outcomes=None):
             )
             faces_after = len(builder.bmesh.faces)
             if face_index is None and faces_after == faces_before:
-                raise RuntimeError(
+                raise PlacementError(
                     f"placements[{index}]: could not place tile at cell {placement['cell_xy']} on plane "
                     f"{placement['plane']} at offset {placement['plane_offset_m']} m: "
                     + (
                         "a DECAL needs a BASE tile in that cell, or an existing face there is not coplanar"
                         if decal
                         else "an existing face in that cell is not coplanar with the plane"
-                    )
+                    ),
+                    index,
                 )
             if outcomes is not None:
                 outcomes.append(faces_after > faces_before)
@@ -2114,6 +2123,49 @@ def _spec_placements(spec_object):
     return placements, origins
 
 
+@contextmanager
+def _object_restored_on_failure(object_name):
+    """On error put the named object back as it was before the block, then re-raise.
+
+    An object the block created is removed (with its mesh); an existing mesh object gets its pixel density,
+    grid id and material slots back, and the scene's ``world_pixels`` is restored either way. The mesh itself
+    is rolled back by :func:`_edit_session`.
+    """
+    data = bpy.context.scene.sprytile_data
+    world_pixels = data.world_pixels
+    obj = bpy.data.objects.get(object_name)
+    existing = None
+    if obj is not None and obj.type == "MESH":
+        existing = {
+            "ppu": obj.get(PIXELS_PER_UNIT_PROP),
+            "grid_id": obj.sprytile_gridid,
+            "slots": len(obj.data.materials),
+            "linked": obj.name in bpy.context.scene.objects,
+        }
+    try:
+        yield
+    except BaseException:
+        data.world_pixels = world_pixels
+        obj = bpy.data.objects.get(object_name)
+        if obj is not None:
+            if existing is None:
+                mesh = obj.data
+                bpy.data.objects.remove(obj, do_unlink=True)
+                if mesh is not None and mesh.users == 0:
+                    bpy.data.meshes.remove(mesh)
+            else:
+                while len(obj.data.materials) > existing["slots"]:
+                    obj.data.materials.pop(index=len(obj.data.materials) - 1)
+                obj.sprytile_gridid = existing["grid_id"]
+                if existing["ppu"] is None:
+                    obj.pop(PIXELS_PER_UNIT_PROP, None)
+                else:
+                    obj[PIXELS_PER_UNIT_PROP] = existing["ppu"]
+                if not existing["linked"] and obj.name in bpy.context.scene.objects:
+                    bpy.context.scene.collection.objects.unlink(obj)
+        raise
+
+
 def build_spec(spec_path):
     """Build a scene from a YAML spec file (see ``spyrite_spec.validate_spec`` for the schema).
 
@@ -2122,8 +2174,10 @@ def build_spec(spec_path):
     per image), resolve every tile name and check every placement against its tileset, and only then create
     each object (:func:`create_tile_object`) and apply, in one edit session per object, ``clear`` (delete all
     its faces first), the ``fills`` (as :func:`fill_tiles`), the ``tiles`` (as :func:`place_tiles`) and the ``patterns`` (as
-    :func:`fill_pattern`), in that order. A failure while placing rolls that object back to what it was; tilesets and objects built
-    before the failure stay. Errors are ``ValueError`` (``SpecError`` for spec problems, starting with the
+    :func:`fill_pattern`), in that order. A failure while placing restores that object to what it was (its faces, pixel density, grid,
+    material slots and the scene's ``world_pixels``; an object this call created is removed); tilesets and
+    objects built before the failure stay. A placement that validates but cannot be built raises
+    ``RuntimeError`` naming its spec entry (``objects.room.tiles[0]: could not place tile ...``). Errors are ``ValueError`` (``SpecError`` for spec problems, starting with the
     dotted path of the bad value, e.g. ``objects.room.tiles[3].tile: ...``).
 
     Returns ``{spec_path, tilesets: [create_tileset report per tileset], objects: [{object_name, built,
@@ -2165,14 +2219,21 @@ def build_spec(spec_path):
             except ValueError as error:
                 message = str(error).replace(f"placements[{index}]", f"objects.{name}.{origins[index]}", 1)
                 raise spyrite_spec.SpecError(message) from None
-        plans.append((name, entry, tileset, normalized))
+        plans.append((name, entry, tileset, normalized, origins))
 
     sprytile_core.ensure_scene_setup(bpy.context.scene)
     objects = []
-    for name, entry, tileset, normalized in plans:
-        report = create_tile_object(name, tileset.material.name, entry["pixels_per_unit"])
-        obj = _mesh_object(report["object_name"])
-        result = _apply_placements(obj, tileset, normalized, clear=entry["clear"])
+    for name, entry, tileset, normalized, origins in plans:
+        with _object_restored_on_failure(name):
+            report = create_tile_object(name, tileset.material.name, entry["pixels_per_unit"])
+            obj = _mesh_object(report["object_name"])
+            try:
+                result = _apply_placements(obj, tileset, normalized, clear=entry["clear"])
+            except PlacementError as error:
+                message = str(error).replace(
+                    f"placements[{error.placement_index}]", f"objects.{name}.{origins[error.placement_index]}", 1
+                )
+                raise RuntimeError(message) from None
         objects.append({"object_name": obj.name, **result})
     return {"spec_path": spec_path, "tilesets": list(tileset_reports.values()), "objects": objects}
 
@@ -2195,13 +2256,18 @@ def export_spec(object_names, spec_path):
     use are written, keyed by material name, with ``image`` relative to the spec's directory when under it.
     ``clear`` is not written. Faces that cannot be rebuilt from placements (not a whole-cell rectangle, facing
     against the plane's normal, no tile data, or from a tileset other than the object's) are left out and
-    reported. ``spec_path`` must be absolute; missing parent directories are created.
+    reported. An overlay object (:func:`create_overlay_object`) is written at its base's offsets (the
+    overlay lift is undone like the decal lift); a spec cannot express overlays, so :func:`build_spec` into
+    the same scene re-applies the lift on the existing overlay, while a fresh scene gets an ordinary object
+    at the base's offsets (recreate it with :func:`create_overlay_object` first to keep the lift).
+    Repeated ``object_names`` are exported once. ``spec_path`` must be absolute; missing parent directories
+    are created.
 
     Returns ``{spec_path, objects: n, tiles: n, unexported_faces: {object_name: [face indices]}}``.
     """
     if isinstance(object_names, (str, bytes)) or not hasattr(object_names, "__iter__"):
         raise ValueError(f"object_names must be a list of object names, got {object_names!r}")
-    object_names = list(object_names)
+    object_names = list(dict.fromkeys(object_names))
     if not object_names:
         raise ValueError("object_names is empty; name at least one tile object")
     if not isinstance(spec_path, (str, os.PathLike)):
@@ -2230,6 +2296,7 @@ def export_spec(object_names, spec_path):
         if tileset is None:
             raise ValueError(f"Object {name!r} has no tileset with an image; nothing to export")
         described = describe_tile_object(name, max_faces=info["face_count"])
+        exported_object = _mesh_object(name)
         entries = []
         skipped = []
         for face in described["faces"]:
@@ -2247,9 +2314,10 @@ def export_spec(object_names, spec_path):
                 if entry["xy"] == tile_xy and (entry["planes"] is None or face["plane"] in entry["planes"]):
                     tile = tile_name
                     break
-            offset = face["plane_offset_m"]
+            offset = face["plane_offset_m"] - _overlay_lift(exported_object, face["plane"])
             if face["layer"] == "DECAL":
-                offset = round(offset - lift * PLANES[face["plane"]]["normal"][PLANES[face["plane"]]["axis"]], 6)
+                offset -= lift * PLANES[face["plane"]]["normal"][PLANES[face["plane"]]["axis"]]
+            offset = round(offset, 6)
             entries.append(
                 (
                     face["layer"] == "DECAL",
