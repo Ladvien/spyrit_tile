@@ -1909,7 +1909,6 @@ class UTIL_OP_SprytileSetNormal(bpy.types.Operator):
                 hit_loc, hit_normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object, ray_origin, ray_vector)
                 if hit_loc is None:
                     return {'RUNNING_MODAL'}
-                hit_normal = context.object.matrix_world.to_quaternion() @ hit_normal
 
                 face_up_vector, face_right_vector = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index)
                 if face_up_vector is None:

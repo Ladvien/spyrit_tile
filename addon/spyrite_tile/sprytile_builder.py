@@ -61,17 +61,26 @@ class TileBuilder:
 
     @staticmethod
     def raycast_object(obj, ray_origin, ray_direction, ray_dist=1000.0,
-                       world_normal=False, work_layer_mask=0, pass_dist=0.001):
+                       work_layer_mask=0, pass_dist=0.001):
+        """
+        Raycast the edit mesh of obj with a world space ray.
+        :param ray_dist: World space maximum distance
+        :return: (location, normal, face_index, distance), all in WORLD space; normal is the unit surface
+                 normal, distance is measured along the ray in world units. All None when nothing is hit.
+        """
         matrix = obj.matrix_world.copy()
         # get the ray relative to the object
         matrix_inv = matrix.inverted()
         ray_origin_obj = matrix_inv @ ray_origin
         ray_target_obj = matrix_inv @ (ray_origin + ray_direction)
         ray_direction_obj = ray_target_obj - ray_origin_obj
+        # BVHTree.ray_cast measures the distance in object space
+        ray_dist_obj = ray_dist * ray_direction_obj.length / ray_direction.length
         mesh = bmesh.from_edit_mesh(obj.data)
+        mesh.faces.ensure_lookup_table()
         tree = BVHTree.FromBMesh(mesh)
 
-        location, normal, face_index, distance = tree.ray_cast(ray_origin_obj, ray_direction_obj, ray_dist)
+        location, normal, face_index, distance = tree.ray_cast(ray_origin_obj, ray_direction_obj, ray_dist_obj)
         if face_index is None:
             return None, None, None, None
 
@@ -87,25 +96,36 @@ class TileBuilder:
         # Layer mask not matching
         if work_layer_value != work_layer_mask:
             do_pass_through = True
-        # Hit face is backface
-        if face.normal.dot(ray_direction) > 0:
-            do_pass_through = not bpy.context.scene.sprytile_data.allow_backface
+        # Hit face is backface. Both vectors are in object space: the sign of the dot product is the same
+        # as in world space, but mixing the spaces flips it on rotated or mirrored objects
+        if face.normal.dot(ray_direction_obj) > 0 and not bpy.context.scene.sprytile_data.allow_backface:
+            do_pass_through = True
         # Hit face is hidden
         if face.hide:
             do_pass_through = True
 
         # Translate location back to world space
         location = matrix @ location
+        hit_distance = (location - ray_origin).length
 
         if do_pass_through:
             # add shift offset if passing through
             shift_vec = ray_direction.normalized() * pass_dist
             new_ray_origin = location + shift_vec
-            return TileBuilder.raycast_object(obj, new_ray_origin, ray_direction, work_layer_mask=work_layer_mask)
+            remaining_dist = ray_dist - hit_distance - pass_dist
+            if remaining_dist <= 0:
+                return None, None, None, None
+            location, normal, face_index, distance = TileBuilder.raycast_object(
+                obj, new_ray_origin, ray_direction, ray_dist=remaining_dist,
+                work_layer_mask=work_layer_mask, pass_dist=pass_dist)
+            if face_index is None:
+                return None, None, None, None
+            # Distance from the original ray origin
+            return location, normal, face_index, distance + hit_distance + pass_dist
 
-        if world_normal:
-            normal = matrix @ normal
-        return location, normal, face_index, distance
+        # Normals transform with the inverse transpose, not the object matrix
+        normal = (matrix.to_3x3().inverted_safe().transposed() @ normal).normalized()
+        return location, normal, face_index, hit_distance
 
     def update_bmesh_tree(self, context, update_index=False):
         self.bmesh = bmesh.from_edit_mesh(context.object.data)
