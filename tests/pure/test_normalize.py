@@ -196,3 +196,31 @@ def test_compose_atlas_names_the_file_with_the_wrong_size(tmp_path):
     Image.new("RGBA", (8, 16)).save(bad)
     with pytest.raises(ValueError, match="bad.png"):
         compose_atlas([good, bad], 16, 2)
+
+
+def test_sidecar_text_round_trips_through_safe_load():
+    import yaml
+    from spyrite_tile_gen.atlas import sidecar_text
+
+    text = sidecar_text(["grass", "wall_top"], [(0, 0), (2, 1)], {"wall_top": ["XZ", "YZ"]})
+    assert yaml.safe_load(text) == {
+        "spyrite_tileset": 1,
+        "tiles": {"grass": {"xy": [0, 0]}, "wall_top": {"xy": [2, 1], "planes": ["XZ", "YZ"]}},
+    }
+
+
+def test_sidecar_text_rejects_bad_names_and_planes():
+    from spyrite_tile_gen.atlas import sidecar_text
+
+    placed = [(0, 0), (1, 0)]
+    with pytest.raises(ValueError, match="unique"):
+        sidecar_text(["a", "a"], placed)
+    with pytest.raises(ValueError, match="letters, digits"):
+        sidecar_text(["a", "b c"], placed)
+    with pytest.raises(ValueError, match="one per|entries"):
+        sidecar_text(["a"], placed)
+    with pytest.raises(ValueError, match="planes_by_name"):
+        sidecar_text(["a", "b"], placed, {"b": ["XX"]})
+    with pytest.raises(ValueError, match="not in names"):
+        sidecar_text(["a", "b"], placed, {"c": ["XY"]})
+

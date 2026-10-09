@@ -9,9 +9,11 @@ uses the second tile of the first row.
 from __future__ import annotations
 
 import io
+import re
 from collections.abc import Sequence
 from pathlib import Path
 
+import yaml
 from PIL import Image
 
 
@@ -44,3 +46,43 @@ def compose_atlas(
     buffer = io.BytesIO()
     canvas.save(buffer, format="PNG")
     return buffer.getvalue(), placed
+
+
+_NAME_PATTERN = re.compile(r"[A-Za-z0-9_]+")
+_PLANES = ("XY", "XZ", "YZ")
+
+
+def sidecar_text(
+    names: Sequence[str],
+    placed: Sequence[tuple[int, int]],
+    planes_by_name: dict[str, list[str]] | None = None,
+) -> str:
+    """The `<atlas>.spyrite.yaml` tile-name sidecar the Blender add-on reads next to the image.
+
+    `names` has one entry per input tile, in input order (so `placed[i]` is `names[i]`'s tile_xy).
+    `planes_by_name` optionally restricts a name to some of XY/XZ/YZ; absent = any plane.
+    """
+    if len(names) != len(placed):
+        raise ValueError(f"names has {len(names)} entries but there are {len(placed)} input tiles")
+    for name in names:
+        if not isinstance(name, str) or not _NAME_PATTERN.fullmatch(name):
+            raise ValueError(f"tile name {name!r} may only contain letters, digits and '_'")
+    if len(set(names)) != len(names):
+        raise ValueError(f"tile names must be unique, got {list(names)}")
+    planes_by_name = planes_by_name or {}
+    unknown = set(planes_by_name) - set(names)
+    if unknown:
+        raise ValueError(f"planes_by_name has names that are not in names: {sorted(unknown)}")
+    tiles: dict[str, dict] = {}
+    for name, (column, row) in zip(names, placed):
+        entry: dict = {"xy": [column, row]}
+        if name in planes_by_name:
+            planes = list(planes_by_name[name])
+            if not planes or any(p not in _PLANES for p in planes) or len(set(planes)) != len(planes):
+                raise ValueError(
+                    f"planes_by_name[{name!r}] must be a non-empty list without repeats from {list(_PLANES)}, "
+                    f"got {planes!r}"
+                )
+            entry["planes"] = planes
+        tiles[name] = entry
+    return yaml.safe_dump({"spyrite_tileset": 1, "tiles": tiles}, sort_keys=False, default_flow_style=None)

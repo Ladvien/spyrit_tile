@@ -636,7 +636,7 @@ def test_tile_outside_the_sheet_names_the_valid_range(tile_object):
         ({"cell_xy": (0, 0), "tile_xy": (0, 0), "plane_offset_m": float("nan")}, "plane_offset_m"),
         ({"cell_xy": (0, 0), "tile_xy": (0, 0), "flip_x": 1}, "flip_x"),
         ({"cell_xy": (0.5, 0), "tile_xy": (0, 0)}, "cell_xy"),
-        ({"cell_xy": (0, 0)}, "missing required"),
+        ({"cell_xy": (0, 0)}, "needs exactly one of tile_xy or tile"),
         ({"cell_xy": (0, 0), "tile_xy": (0, 0), "colour": 1}, "unknown keys"),
     ],
 )

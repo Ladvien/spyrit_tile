@@ -27,7 +27,7 @@ open tile mesh would always fail, does not apply.
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -59,10 +59,11 @@ __all__ = [
 
 @dataclass(frozen=True)
 class TilePlacement:
-    """Tile at a cell; tile_xy=(col from left, row from top); picture turned CCW by rotation_deg, then mirrored as seen."""
+    """Tile at a cell; give exactly one of tile_xy=(col from left, row from top) or tile (a name from the tileset's sidecar, or a (col, row) pair); picture turned CCW by rotation_deg, then mirrored as seen."""
 
     cell_xy: tuple[int, int]
-    tile_xy: tuple[int, int]
+    tile_xy: tuple[int, int] | None = None
+    tile: str | tuple[int, int] | None = None
     tile_span: tuple[int, int] = (1, 1)
     plane: Literal["XY", "XZ", "YZ"] = "XY"
     plane_offset_m: float = 0.0
@@ -84,6 +85,7 @@ class TilesetReport:
     rows: int
     grid_id: int
     reused_material: str | None = None
+    tile_names: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -114,13 +116,14 @@ class TileFaceReading:
     `rotation_deg`, `flip_x`, `flip_y`, `layer`, `plane`, `plane_offset_m` and `cell_xy` read back exactly what
     place_tiles was given; `facing` is +1 along the plane's normal, -1 against it, 0 without plane; `on_grid` is
     false for faces that are not whole-cell rectangles (then `cell_xy` is only the cell of the minimum corner).
-    `tile` is the tile's name, None when the tileset has no names.
+    `tile` is the tile's name from the tileset's sidecar, None when the tile is unnamed.
     """
 
     index: int
     center_m: tuple[float, float, float]
     normal: tuple[float, float, float]
     tile_xy: tuple[int, int]
+    tile: str | None
     material: str
     tile_span: tuple[int, int]
     rotation_deg: int
@@ -230,9 +233,8 @@ def _triple(values) -> tuple[float, float, float]:
 
 
 def _placement_dict(placement: TilePlacement) -> dict:
-    return {
+    result = {
         "cell_xy": list(placement.cell_xy),
-        "tile_xy": list(placement.tile_xy),
         "tile_span": list(placement.tile_span),
         "plane": placement.plane,
         "plane_offset_m": placement.plane_offset_m,
@@ -241,6 +243,11 @@ def _placement_dict(placement: TilePlacement) -> dict:
         "flip_y": placement.flip_y,
         "layer": placement.layer,
     }
+    if placement.tile_xy is not None:
+        result["tile_xy"] = list(placement.tile_xy)
+    if placement.tile is not None:
+        result["tile"] = placement.tile if isinstance(placement.tile, str) else list(placement.tile)
+    return result
 
 
 def _edit_report(result: dict) -> TileEditReport:
@@ -284,6 +291,7 @@ def import_tileset(
         rows=int(result["rows"]),
         grid_id=int(result["grid_id"]),
         reused_material=result["reused_material"],
+        tile_names=result["tile_names"],
     )
 
 
@@ -323,7 +331,7 @@ def fill_tiles(
     tileset_name: str,
     cell_min_xy: tuple[int, int],
     cell_max_xy: tuple[int, int],
-    tile_xy: tuple[int, int],
+    tile_xy: tuple[int, int] | str,
     plane: Literal["XY", "XZ", "YZ"] = "XY",
     plane_offset_m: float = 0.0,
     rotation_deg: float = 0.0,
@@ -367,7 +375,7 @@ def paint_faces(
     object_name: str,
     tileset_name: str,
     face_indices: list[int],
-    tile_xy: tuple[int, int],
+    tile_xy: tuple[int, int] | str,
     rotation_deg: float = 0.0,
     flip_x: bool = False,
     flip_y: bool = False,

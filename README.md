@@ -59,6 +59,13 @@ by `plane_offset_m`. Tilesets are idempotent: `import_tileset` with an image and
 backs a tileset under another name creates nothing and returns that tileset (`reused_material`), so
 always use the report's `material_name`. There is no automatic fallback between generation backends.
 
+Tile names: put `<image stem>.spyrite.yaml` next to a tileset image (`tiles.png` -> `tiles.spyrite.yaml`):
+`spyrite_tileset: 1` and `tiles: {grass: {xy: [0, 0], tags: [floor]}, wall_top: {xy: [2, 0], planes: [XZ, YZ]}}`.
+Then any tile argument (`tile` / `tile_xy` in placements, `fill_tiles`, `paint_faces`) may be a name, `planes`
+restricts where a name may be placed, and `tile_object_report` / `import_tileset` report the names.
+`compose_atlas(names=[...], planes_by_name={...})` writes the sidecar for you. The YAML parser is
+vendored (`addon/spyrite_tile/_vendor/yaml`, PyYAML 6.0.3, MIT) because Blender's Python has none.
+
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and
 `tests/gui/run_gui_smoke.sh` (drives the interactive tools in a GUI Blender with simulated input).
