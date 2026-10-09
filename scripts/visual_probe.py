@@ -1,7 +1,9 @@
 """Visual oracle for tile objects in the Blender you have open, over blended's MCP server.
 
-What it proves, per face, from pixels on screen: the colour the viewport actually draws over the
-middle of a tile face matches the colour of the tile the mesh data says is there. That is ground
+What it proves, per face, from pixels on screen: the colours the viewport actually draws in the four
+quadrants of a tile face match the four quadrants of the tile the mesh data says is there, turned and
+mirrored the way the request (`--placements`) asked. With a solid-colour tileset this reduces to
+"right colour"; with `tests/fixtures/tiles_oriented_16px.png` it also proves orientation. That is ground
 truth outside the code under test: the expected colour comes from the tileset IMAGE file, the observed
 colour from a SCREENSHOT, and the link between them from Blender's own projection
 (`view3d_utils.location_3d_to_region_2d`). Neither side reuses the UV/tile maths being tested.
@@ -185,7 +187,40 @@ def _covered(point, covers):
     return any(c["x"] <= x <= c["x"] + c["w"] and c["y"] <= y <= c["y"] + c["h"] for c in covers)
 
 
-def measure(layout, shot, tileset, tile_size, tiles_by_index, tolerance):
+# Viewed from its normal side, a face's (right, up) axes; the probe views look straight at these.
+PLANE_FRAME = {"XY": (0, 1), "XZ": (0, 2), "YZ": (1, 2)}  # world axes of (right, up)
+
+
+def _plane_of(normal):
+    axis = max(range(3), key=lambda k: abs(normal[k]))
+    return {2: "XY", 1: "XZ", 0: "YZ"}[axis]
+
+
+def _cell_of(centre_m, plane, cell_size_m):
+    right_axis, up_axis = PLANE_FRAME[plane]
+    return (int(centre_m[right_axis] // cell_size_m), int(centre_m[up_axis] // cell_size_m))
+
+
+def _turn(quadrants, rotation_deg, flip_x, flip_y):
+    """Contract: turn the 2x2 picture counter-clockwise, then mirror it as seen."""
+    m = [list(line) for line in quadrants]
+    for _ in range(int(rotation_deg) // 90):
+        m = [[m[j][1 - i] for j in range(2)] for i in range(2)]
+    if flip_x:
+        m = [line[::-1] for line in m]
+    if flip_y:
+        m = m[::-1]
+    return m
+
+
+def _quadrant_boxes(box):
+    x0, y0, x1, y1 = box
+    xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
+    return [[(x0, y0, xm, ym), (xm, y0, x1, ym)], [(x0, ym, xm, y1), (xm, ym, x1, y1)]]  # top row first
+
+
+def measure(layout, shot, tileset, tile_size, faces_by_index, placements, cell_size_m, tolerance):
+    """Per face: the 4 quadrant colours on screen vs the tile's quadrants turned per its placement."""
     scale = shot.width / layout["area"]["w"]
     region = layout["region"]
     results = []
@@ -198,21 +233,40 @@ def measure(layout, shot, tileset, tile_size, tiles_by_index, tolerance):
         box = (min(xs), min(ys), max(xs), max(ys))
         if box[0] < 0 or box[1] < 0 or box[2] > shot.width or box[3] > shot.height:
             continue
-        if box[2] - box[0] < MIN_BOX_PX or box[3] - box[1] < MIN_BOX_PX:
+        if box[2] - box[0] < 2 * MIN_BOX_PX or box[3] - box[1] < 2 * MIN_BOX_PX:
             continue
-        tile_xy = tiles_by_index.get(face["index"])
-        if tile_xy is None or tile_xy == [-1, -1]:
+        info = faces_by_index.get(face["index"])
+        if info is None or info["tile_xy"] == [-1, -1]:
             continue
-        col, row = tile_xy
+        plane = _plane_of(info["normal"])
+        cell = _cell_of(info["center_m"], plane, cell_size_m)
+        placement = placements.get((plane, cell), {}) if placements is not None else {}
+        if placements is not None and not placement:
+            continue  # a face the caller did not describe cannot be judged
+        col, row = info["tile_xy"]
         tile_box = (col * tile_size, row * tile_size, (col + 1) * tile_size, (row + 1) * tile_size)
-        expected = _mean(tileset, _inner(tile_box))
-        observed = _mean(shot, _inner(box))
-        delta = max(abs(e - o) for e, o in zip(expected, observed))
-        results.append(dict(index=face["index"], tile_xy=tile_xy, screen_box=[round(v, 1) for v in box],
-                            expected_rgb=[round(v, 1) for v in expected],
-                            observed_rgb=[round(v, 1) for v in observed],
+        tile_quads = [[_mean(tileset, _inner(b)) for b in line] for line in _quadrant_boxes(tile_box)]
+        expected = _turn(tile_quads, placement.get("rotation_deg", 0),
+                         placement.get("flip_x", False), placement.get("flip_y", False))
+        observed = [[_mean(shot, _inner(b)) for b in line] for line in _quadrant_boxes(box)]
+        delta = max(abs(e - o) for el, ol in zip(expected, observed) for eq, oq in zip(el, ol)
+                    for e, o in zip(eq, oq))
+        rounded = lambda q: [[[round(v, 1) for v in c] for c in line] for line in q]  # noqa: E731
+        results.append(dict(index=face["index"], plane=plane, cell=list(cell), tile_xy=info["tile_xy"],
+                            placement=placement, screen_box=[round(v, 1) for v in box],
+                            expected_quadrants=rounded(expected), observed_quadrants=rounded(observed),
                             max_channel_delta=round(delta, 1), ok=delta <= tolerance))
     return results
+
+
+def _load_placements(path):
+    """{(plane, cell): placement} from a JSON list of place_tiles placements."""
+    if path is None:
+        return None
+    out = {}
+    for p in json.loads(Path(path).read_text()):
+        out[(p.get("plane", "XY"), tuple(p["cell_xy"]))] = p
+    return out
 
 
 def write_evidence(out, shot, results):
@@ -242,7 +296,7 @@ async def main(args):
             await session.initialize()
             report = _returned((await _call(session, "tile_object_report",
                                             {"object_name": args.object}))[1])
-            tiles_by_index = {f["index"]: f["tile_xy"] for f in report["faces"]}
+            faces_by_index = {f["index"]: f for f in report["faces"]}
             await _call(session, "declare_plan", {"steps": ["set probe view", "measure", "restore view"]})
             setup = SETUP_VIEW.format(object_name=args.object, zoom_cell=args.zoom_cell,
                                       cell_size_m=args.cell_size_m, view=args.view,
@@ -262,7 +316,8 @@ async def main(args):
     image_block = next(c for c in shot_result.content if c.type == "image")
     shot = Image.open(io.BytesIO(base64.b64decode(image_block.data))).convert("RGB")
     tileset = Image.open(args.tileset).convert("RGB")
-    results = measure(layout, shot, tileset, args.tile_size, tiles_by_index, args.tolerance)
+    results = measure(layout, shot, tileset, args.tile_size, faces_by_index,
+                      _load_placements(args.placements), args.cell_size_m, args.tolerance)
     out = Path(args.out)
     write_evidence(out, shot, results)
 
@@ -275,15 +330,16 @@ async def main(args):
         problems.append(f"expected colours do not vary (tiles {sorted(expected_tiles)}): the probe "
                         f"cannot tell a right answer from a constant one; place >= 2 different tiles "
                         f"or pass --allow-uniform")
-    observed = {tuple(round(v / 8) for v in r["observed_rgb"]) for r in results}
+    observed = {tuple(round(v / 8) for v in r["observed_quadrants"][0][0]) for r in results}
     if len(expected_tiles) >= 2 and len(observed) < 2:
         problems.append("observed colours are uniform although different tiles are placed")
     bad = [r for r in results if not r["ok"]]
     if bad:
         worst = max(bad, key=lambda r: r["max_channel_delta"])
         problems.append(f"{len(bad)}/{len(results)} faces differ by > {args.tolerance}; worst face "
-                        f"{worst['index']} tile {worst['tile_xy']} expected {worst['expected_rgb']} "
-                        f"observed {worst['observed_rgb']}")
+                        f"{worst['index']} cell {worst['cell']} on {worst['plane']} tile {worst['tile_xy']} "
+                        f"placement {worst['placement']} expected {worst['expected_quadrants']} "
+                        f"observed {worst['observed_quadrants']}")
     summary = (f"measured={len(results)} tiles={len(expected_tiles)} "
                f"max_delta={max((r['max_channel_delta'] for r in results), default=0)} evidence={out}")
     if problems:
@@ -303,6 +359,9 @@ def _parse(argv):
     parser.add_argument("--tolerance", type=float, default=12.0, help="max channel delta, 0-255")
     parser.add_argument("--min-faces", type=int, default=1)
     parser.add_argument("--allow-uniform", action="store_true")
+    parser.add_argument("--placements", default=None,
+                        help="JSON list of the place_tiles placements: judge orientation (rotation/flips) "
+                             "per face; faces not listed are skipped")
     parser.add_argument("--out", default=str(REPOSITORY / "outputs" / "visual_probe"))
     return parser.parse_args(argv)
 

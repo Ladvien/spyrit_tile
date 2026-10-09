@@ -3,7 +3,9 @@
 The same path an agent uses: MCP client -> blender-mcp (stdio) -> the `mcp` add-on's
 socket in your running Blender -> blended's dispatch -> spyrite_tile_ops -> the add-on API.
 It builds `spyrite_smoke_room` (a 6x6 floor and a 6x3 wall from the 16 px fixture) and
-`spyrite_probe_board` (4x4 cells left of the room, every tile once, for `visual_probe.py`), turns on
+`spyrite_probe_board` (4x4 cells left of the room, every tile once) and one orientation board per
+plane (`spyrite_orient_xy/xz/yz`: every rotation x flip state, oriented fixture; their placements are
+written to `outputs/live_smoke/placements_<plane>.json`) for `visual_probe.py`, turns on
 texture shading, frames it, saves a window screenshot and asserts the face count and tiles.
 
 Needs: Blender open with the `mcp` add-on server running (blended's `make install-mcp-addon`)
@@ -29,6 +31,18 @@ FIXTURE = REPOSITORY / "tests" / "fixtures" / "tiles_16px.png"
 OUTPUT = REPOSITORY / "outputs" / "live_smoke"
 ROOM = "spyrite_smoke_room"
 BOARD = "spyrite_probe_board"  # 4x4 cells, each a different tile: what scripts/visual_probe.py needs
+ORIENTED_FIXTURE = REPOSITORY / "tests" / "fixtures" / "tiles_oriented_16px.png"
+ORIENTED_TILESET = "spyrite_oriented_tiles"
+# One object per plane, apart so none hides another; 16 cells = 4 rotations x 4 flip states.
+ORIENT_BOARDS = {"XY": ("spyrite_orient_xy", 0.0), "XZ": ("spyrite_orient_xz", -10.0),
+                 "YZ": ("spyrite_orient_yz", 10.0)}
+
+
+def orientation_placements(plane, offset_m):
+    flips = [(False, False), (True, False), (False, True), (True, True)]
+    return [{"cell_xy": [x, y], "tile_xy": [(x + y) % 4, (x + 2 * y) % 4], "plane": plane,
+             "plane_offset_m": offset_m, "rotation_deg": 90 * x,
+             "flip_x": flips[y][0], "flip_y": flips[y][1]} for x in range(4) for y in range(4)]
 TILESET = "spyrite_smoke_tiles"
 FLOOR_CELLS = 6 * 6
 WALL_CELLS = 6 * 3
@@ -38,7 +52,7 @@ WALL_TILE = [2, 0]
 REMOVE_ROOM = f"""import bpy
 if bpy.context.object is not None and bpy.context.object.mode != 'OBJECT':
     bpy.ops.object.mode_set(mode='OBJECT')
-for name in ({ROOM!r}, {BOARD!r}):
+for name in ({ROOM!r}, {BOARD!r}, *{tuple(n for n, _ in ORIENT_BOARDS.values())!r}):
     o = bpy.data.objects.get(name)
     if o is not None:
         bpy.data.objects.remove(o)
@@ -120,6 +134,19 @@ async def main(reload_api: bool) -> None:
                 "object_name": BOARD, "tileset_name": TILESET, "plan_step": 4,
                 "placements": [{"cell_xy": [x - 6, y], "tile_xy": [x, 3 - y]}
                                for x in range(4) for y in range(4)]})
+            await _call(session, "import_tileset", {
+                "name": ORIENTED_TILESET, "image_path": str(ORIENTED_FIXTURE),
+                "tile_size_px": [16, 16], "plan_step": 2})
+            for plane, (name, offset_m) in ORIENT_BOARDS.items():
+                placements = orientation_placements(plane, offset_m)
+                await _call(session, "create_tile_object", {
+                    "name": name, "tileset_name": ORIENTED_TILESET, "plan_step": 3})
+                built = _returned((await _call(session, "place_tiles", {
+                    "object_name": name, "tileset_name": ORIENTED_TILESET,
+                    "placements": placements, "plan_step": 4}))[1])
+                if built["face_count"] != len(placements):
+                    raise SmokeFailure(f"{name}: {built['face_count']} faces, expected {len(placements)}")
+                (OUTPUT / f"placements_{plane}.json").write_text(json.dumps(placements))
             view = _returned((await _call(session, "set_pixel_art_view", {"plan_step": 5}))[1])
             if view["viewports_textured"] < 1:
                 raise SmokeFailure(f"no open Solid viewport was switched to textures: {view}")

@@ -47,8 +47,10 @@ Planes
     "rotate left" (``mesh_rotate`` is stored as these degrees in radians). The
     face keeps covering its cell; only the UV orientation turns. (The
     interactive Build tool rotates the whole grid about the cursor instead, so
-    its footprint moves; the API does not.) ``flip_x``/``flip_y`` mirror the
-    picture along the tile's own horizontal/vertical axis after that rotation.
+    its footprint moves; the API does not.) ``flip_x``/``flip_y`` then mirror the
+    turned picture left-right/top-bottom as seen from the normal side, so a
+    flag means the same on screen whatever the rotation (as in Tiled; Sprytile's
+    own flags act before the turn, see ``_sprytile_flips``).
 
 Layers
     ``BASE`` builds the face on the plane. ``DECAL`` builds a mesh decal one
@@ -489,6 +491,18 @@ def _preserved_settings(obj, grid):
         obj.sprytile_gridid = grid_id
 
 
+def _sprytile_flips(rotation_deg, flip_x, flip_y):
+    """Sprytile's (uv_flip_x, uv_flip_y) for the documented orientation.
+
+    The contract mirrors the picture as seen, after turning it. Sprytile mirrors in the tile's own
+    frame before turning it. For a quarter turn the tile's horizontal axis is the viewer's vertical
+    one, so the two flags trade places; for 0 and 180 degrees they coincide.
+    """
+    if rotation_deg % 180 == 90:
+        return flip_y, flip_x
+    return flip_x, flip_y
+
+
 def _rotated_frame(right, up, rotation_deg):
     """UV-side (right, up) after turning the tile picture counter-clockwise by rotation_deg."""
     cos, sin = _ROTATION_COS_SIN[rotation_deg]
@@ -559,8 +573,9 @@ def _apply_placements(obj, tileset, placements):
             span_x, span_y = placement["tile_span"]
             origin_x, origin_y = tileset.sprytile_origin(placement["tile_xy"], placement["tile_span"])
 
-            data.uv_flip_x = placement["flip_x"]
-            data.uv_flip_y = placement["flip_y"]
+            data.uv_flip_x, data.uv_flip_y = _sprytile_flips(
+                placement["rotation_deg"], placement["flip_x"], placement["flip_y"]
+            )
             data.mesh_rotate = math.radians(placement["rotation_deg"])
             data.work_layer = "DECAL_1" if decal else "BASE"
             grid.tile_selection = (origin_x, origin_y, span_x, span_y)
@@ -790,8 +805,7 @@ def paint_faces(object_name, material_name, face_indices, tile_xy, rotation_deg=
         data.paint_mode = "MAKE_FACE"
         data.paint_align = "CENTER"
         data.work_layer_mode = "MESH_DECAL"
-        data.uv_flip_x = flip_x
-        data.uv_flip_y = flip_y
+        data.uv_flip_x, data.uv_flip_y = _sprytile_flips(rotation, flip_x, flip_y)
         data.mesh_rotate = math.radians(rotation)
         grid.tile_selection = (origin_x, origin_y, 1, 1)
         normal_matrix = obj.matrix_world.to_3x3().inverted_safe().transposed()

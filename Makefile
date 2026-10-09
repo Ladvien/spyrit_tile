@@ -52,6 +52,10 @@ test-live:
 # visible tile face's on-screen colour must match its tile in the tileset image. Evidence
 # (screenshot, annotated boxes, zoom crops, faces.json) lands in outputs/visual_probe/.
 PROBE = .venv/bin/python scripts/visual_probe.py --tileset tests/fixtures/tiles_16px.png --tile-size 16
+OPROBE = .venv/bin/python scripts/visual_probe.py --tileset tests/fixtures/tiles_oriented_16px.png --tile-size 16 --min-faces 16
 test-visual:
 	$(PROBE) --object spyrite_probe_board --view top --min-faces 16 --out outputs/visual_probe/board_top
 	$(PROBE) --object spyrite_smoke_room --view front --min-faces 18 --allow-uniform --out outputs/visual_probe/room_front
+	$(OPROBE) --object spyrite_orient_xy --view top --placements outputs/live_smoke/placements_XY.json --out outputs/visual_probe/orient_xy
+	$(OPROBE) --object spyrite_orient_xz --view front --placements outputs/live_smoke/placements_XZ.json --out outputs/visual_probe/orient_xz
+	$(OPROBE) --object spyrite_orient_yz --view right --placements outputs/live_smoke/placements_YZ.json --out outputs/visual_probe/orient_yz

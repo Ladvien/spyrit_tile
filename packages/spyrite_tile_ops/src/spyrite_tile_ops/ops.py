@@ -58,7 +58,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class TilePlacement:
-    """One tile on a grid cell; tile_xy is (column from left, row from top); layer BASE or DECAL."""
+    """Tile at a cell; tile_xy=(col from left, row from top); picture turned CCW by rotation_deg, then mirrored as seen."""
 
     cell_xy: tuple[int, int]
     tile_xy: tuple[int, int]
