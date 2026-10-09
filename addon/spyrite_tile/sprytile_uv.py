@@ -322,7 +322,7 @@ def apply_uvs(context, face, uv_verts, target_grid,
         face.material_index = mat_idx
 
     # Save the grid and tile ID to the face
-    # If adding more layers, make sure setup in sprytile_modal.update_bmesh_tree
+    # If adding more layers, make sure setup in sprytile_builder.TileBuilder.update_bmesh_tree
     grid_layer_id = mesh.faces.layers.int.get(UvDataLayers.GRID_INDEX)
     grid_layer_tileid = mesh.faces.layers.int.get(UvDataLayers.GRID_TILE_ID)
     grid_sel_width = mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_WIDTH)

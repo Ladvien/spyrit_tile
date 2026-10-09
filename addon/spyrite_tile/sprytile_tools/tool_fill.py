@@ -92,7 +92,7 @@ class ToolFill:
                            int(hit_coord.y) - grid_min[1]]
 
         # For getting paint settings later
-        paint_setting_layer = self.modal.bmesh.faces.layers.int.get(UvDataLayers.PAINT_SETTINGS)
+        paint_setting_layer = self.modal.builder.bmesh.faces.layers.int.get(UvDataLayers.PAINT_SETTINGS)
 
         # Get vectors again, to apply tile rotations in UV stage
         up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene)
@@ -109,7 +109,7 @@ class ToolFill:
             for idx, cell_coord in enumerate(fill_coords):
                 face_index = face_idx_array[cell_coord[1]][cell_coord[0]]
                 if face_index > -1:
-                    face = self.modal.bmesh.faces[face_index]
+                    face = self.modal.builder.bmesh.faces[face_index]
                     paint_setting_cache[idx] = face[paint_setting_layer]
 
         # Get the work layer filter, based on layer settings
@@ -133,13 +133,14 @@ class ToolFill:
             sub_x = (grid_coord[0] - int(hit_coord.x)) % sel_size[0]
             sub_y = (grid_coord[1] - int(hit_coord.y)) % sel_size[1]
             sub_xy = sel_coords[(sub_y * sel_size[0]) + sub_x]
-            self.modal.construct_face(context, grid_coord, [1,1],
+            self.modal.builder.construct_face(context, grid_coord, [1,1],
                                       sub_xy, origin_xy,
                                       grid_up, grid_right,
                                       up_vector, right_vector,
                                       plane_normal,
                                       require_base_layer=require_base_layer,
-                                      work_layer_mask=work_layer_mask)
+                                      work_layer_mask=work_layer_mask,
+                                      grid_origin=scene.cursor.location.copy())
 
     def build_fill_map(self, context, grid_up, grid_right,
                        plane_normal, plane_size, grid_min, grid_max,
@@ -152,9 +153,10 @@ class ToolFill:
         idx_x = 0
         for y in range(grid_min[1], grid_max[1]):
             for x in range(grid_min[0], grid_max[0]):
-                hit_loc, hit_normal, face_index, hit_dist = self.modal.raycast_grid_coord(
+                hit_loc, hit_normal, face_index, hit_dist = self.modal.builder.raycast_grid_coord(
                                                                 context, x, y,
-                                                                grid_up, grid_right, plane_normal)
+                                                                grid_up, grid_right, plane_normal,
+                                                                grid_origin=context.scene.cursor.location.copy())
 
                 if hit_loc is not None:
                     grid_id, tile_packed_id, width, height, origin = self.modal.get_tiledata_from_index(face_index)
