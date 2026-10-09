@@ -56,6 +56,10 @@ __all__ = [
     "tile_object_report",
     "scene_report",
     "select_tile_faces",
+    "checkpoint",
+    "rollback",
+    "discard_checkpoint",
+    "list_checkpoints",
     "set_pixel_art_view",
     "build_spec",
     "export_spec",
@@ -307,6 +311,47 @@ class TileFaceSelection:
 
     face_indices: tuple[int, ...]
     count: int
+
+
+@dataclass(frozen=True)
+class CheckpointReport:
+    """A checkpoint just taken: its id and the objects it covers."""
+
+    checkpoint_id: int
+    objects: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class RollbackReport:
+    """The objects restored from a checkpoint (the checkpoint stays available)."""
+
+    checkpoint_id: int
+    restored: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CheckpointSummary:
+    """One live checkpoint; `created` is an ISO-8601 UTC timestamp."""
+
+    checkpoint_id: int
+    label: str
+    created: str
+    objects: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class CheckpointListing:
+    """Every live checkpoint, oldest first."""
+
+    checkpoints: tuple[CheckpointSummary, ...]
+
+
+@dataclass(frozen=True)
+class DiscardReport:
+    """The checkpoint removed and the objects it covered."""
+
+    checkpoint_id: int
+    discarded: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -780,6 +825,56 @@ def scene_report() -> SceneReading:
         world_pixels=int(settings["world_pixels"]),
         mesh_decal_offset=float(settings["mesh_decal_offset"]),
         auto_merge=bool(settings["auto_merge"]),
+    )
+
+
+def _checkpoint_number(checkpoint_id: str) -> int:
+    """The checkpoint id as an int; ids travel as text because blended reserves bare numeric parameters for quantities."""
+    try:
+        return int(checkpoint_id)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"checkpoint_id must be the number from checkpoint or list_checkpoints, got {checkpoint_id!r}"
+        ) from None
+
+
+def checkpoint(objects: list[str] | None = None, label: str = "") -> CheckpointReport:
+    """Snapshot tile objects (all tile objects when objects is omitted) so rollback can restore them."""
+    result = _addon_api().checkpoint(object_names=objects, label=label)
+    return CheckpointReport(
+        checkpoint_id=int(result["checkpoint_id"]), objects=tuple(result["objects"])
+    )
+
+
+def rollback(checkpoint_id: str) -> RollbackReport:
+    """Restore every object of a checkpoint (mesh, grid, materials, transform); the checkpoint stays usable."""
+    result = _addon_api().rollback(checkpoint_id=_checkpoint_number(checkpoint_id))
+    return RollbackReport(
+        checkpoint_id=int(result["checkpoint_id"]), restored=tuple(result["restored"])
+    )
+
+
+def discard_checkpoint(checkpoint_id: str) -> DiscardReport:
+    """Forget a checkpoint and delete its hidden mesh copies."""
+    result = _addon_api().discard_checkpoint(checkpoint_id=_checkpoint_number(checkpoint_id))
+    return DiscardReport(
+        checkpoint_id=int(result["checkpoint_id"]), discarded=tuple(result["discarded"])
+    )
+
+
+@op(reads_only=True)
+def list_checkpoints() -> CheckpointListing:
+    """List the live checkpoints: id, label, ISO-8601 UTC creation time, objects."""
+    return CheckpointListing(
+        checkpoints=tuple(
+            CheckpointSummary(
+                checkpoint_id=int(c["checkpoint_id"]),
+                label=c["label"],
+                created=c["created"],
+                objects=tuple(c["objects"]),
+            )
+            for c in _addon_api().list_checkpoints()
+        )
     )
 
 
