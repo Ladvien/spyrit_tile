@@ -308,7 +308,8 @@ def compose_atlas(
 
     `names` (one per input tile, letters/digits/underscore, unique) also writes `<output_name>.spyrite.yaml`
     next to the PNG so Blender tools can place tiles by name; `planes_by_name` restricts a name to some of
-    XY/XZ/YZ (default: any). The sidecar path is returned as `sidecar`.
+    XY/XZ/YZ (default: any). The sidecar path is returned as `sidecar`. Re-running without `names`
+    removes an existing sidecar of that `output_name`, since it no longer describes the new atlas.
     """
     for entry in paths:
         if not Path(entry).is_absolute():
@@ -326,9 +327,11 @@ def compose_atlas(
             "tiles": [{"path": p, "tile_xy": list(xy)} for p, xy in zip(paths, placed)],
         },
     )
+    sidecar_path = saved.with_suffix(".spyrite.yaml")
     if sidecar is not None:
-        sidecar_path = saved.with_suffix(".spyrite.yaml")
         sidecar_path.write_text(sidecar, encoding="utf-8")
+    else:  # the atlas was replaced: an earlier run's names would point at the wrong tiles
+        sidecar_path.unlink(missing_ok=True)
     rows = -(-len(paths) // columns)
     info = {
         "path": str(saved),

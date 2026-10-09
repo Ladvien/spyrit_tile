@@ -10,3 +10,4 @@ dev = ["pytest>=8"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/pure"]
+markers = ["real_repo: use devserver.REPO as derived by the module, not the test checkout patch"]

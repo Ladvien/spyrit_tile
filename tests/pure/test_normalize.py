@@ -198,14 +198,13 @@ def test_compose_atlas_names_the_file_with_the_wrong_size(tmp_path):
         compose_atlas([good, bad], 16, 2)
 
 
-def test_sidecar_text_round_trips_through_safe_load():
-    import yaml
+def test_sidecar_text_is_accepted_by_the_addons_parser(addon_spec):
     from spyrite_tile_gen.atlas import sidecar_text
 
     text = sidecar_text(["grass", "wall_top"], [(0, 0), (2, 1)], {"wall_top": ["XZ", "YZ"]})
-    assert yaml.safe_load(text) == {
-        "spyrite_tileset": 1,
-        "tiles": {"grass": {"xy": [0, 0]}, "wall_top": {"xy": [2, 1], "planes": ["XZ", "YZ"]}},
+    assert addon_spec.load_tile_names(text) == {
+        "grass": {"xy": [0, 0], "planes": None, "tags": []},
+        "wall_top": {"xy": [2, 1], "planes": ["XZ", "YZ"], "tags": []},
     }
 
 

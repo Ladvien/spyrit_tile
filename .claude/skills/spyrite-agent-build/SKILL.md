@@ -44,4 +44,9 @@ skills, scripts and docs come from the `spyrite-tile-dev` MCP server (resources 
 `spyrite://skills`, `spyrite://skills/{name}`, `spyrite://scripts`, `spyrite://scripts/{name}`,
 `spyrite://docs/api`, `spyrite://specs/example`; tools `list_skills`, `read_skill`, `list_scripts`,
 `run_script(name, args, timeout_s)` (allowlist: visual_probe, live_smoke, test_pure, test_blender,
-test_gui, test_visual, test_live, gui_check).
+test_gui, test_visual, test_live, gui_check). No shell is involved and arguments are checked:
+test_pure/test_blender/test_gui/test_visual take none; live_smoke/test_live take only `--reload-api`;
+visual_probe takes its own options (`--object`, `--tileset`, `--tile-size` required; `--tileset`/`--placements`
+existing files in the repo; `--out` a directory under `outputs/`); gui_check takes one `tests/gui/check_issue_*.py`.
+`timeout_s` is 1-3600 and a timeout kills the script's whole process group (`timed_out: true`). Scripts do not
+inherit the host's API keys.

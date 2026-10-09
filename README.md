@@ -57,6 +57,10 @@ Dev MCP server `spyrite-tile-dev` (`packages/spyrite_tile_gen/.../devserver.py`)
 prompts `spyrite_build_scene(brief)` and `spyrite_self_review(object_name)`; tools `list_skills`, `read_skill`,
 `list_scripts`, `run_script(name, args, timeout_s)` over an allowlist (`visual_probe`, `live_smoke`, `test_pure`,
 `test_blender`, `test_gui`, `test_visual`, `test_live`, `gui_check`; `bump_version` and `release` are not exposed).
+`run_script` never uses a shell and checks its arguments: the `make` targets take none, `live_smoke`/`test_live`
+take only `--reload-api`, `visual_probe` takes its own options (`--out` must be under `outputs/`, `--tileset` and
+`--placements` existing files in the repo), `gui_check` takes one `tests/gui/check_issue_*.py`. `timeout_s` is 1-3600
+and a timeout kills the whole process group; scripts run with a minimal environment (no API keys).
 The loop an agent follows is the `spyrite-agent-build` skill.
 
 Conventions: `tile_xy` is (column from the left, row from the top) of the tileset image;
