@@ -346,6 +346,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
     if material is None:
         material = bpy.data.materials.new(material_name)
     material.use_fake_user = True
+    sprytile_utils.restore_removed_tileset(material)
     sprytile_utils.setup_tile_material(material, image)
     sprytile_utils.validate_grids(scene)
 

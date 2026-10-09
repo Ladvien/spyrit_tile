@@ -4,10 +4,23 @@ import importlib
 from pathlib import Path
 
 import bpy
+import pytest
 
 sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
 FIXTURE = str(Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png")
 
+
+@pytest.fixture(autouse=True)
+def clean_up():
+    yield
+    for ob in [o for o in bpy.data.objects if o.name.startswith("i100_")]:
+        bpy.data.objects.remove(ob, do_unlink=True)
+    for coll, prefix in ((bpy.data.meshes, "i100_"), (bpy.data.materials, "tiles_16px"),
+                         (bpy.data.images, "tiles_16px")):
+        for block in [b for b in coll if b.name.startswith(prefix)]:
+            coll.remove(block)
+
+    sprytile_utils.validate_grids(bpy.context.scene)
 
 def _object(name):
     me = bpy.data.meshes.new(name)
