@@ -734,6 +734,8 @@ def extrude_edge(
     whole number of cell heights. Sides S and E need walls facing +Y / -X, which no plane has.
     """
     _check_rotation_deg(rotation_deg)
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError(f"count must be an integer >= 1 (the wall's height in cells), got {count!r}")
     result = _addon_api().extrude_edge(
         object_name=object_name,
         material_name=tileset_name,
