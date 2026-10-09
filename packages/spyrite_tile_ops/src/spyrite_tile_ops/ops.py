@@ -826,9 +826,9 @@ def scene_report() -> SceneReading:
     )
 
 
-def checkpoint(object_names: list[str] | None = None, label: str = "") -> CheckpointReport:
-    """Snapshot tile objects (all tile objects when object_names is omitted) so rollback can restore them."""
-    result = _addon_api().checkpoint(object_names=object_names, label=label)
+def checkpoint(objects: list[str] | None = None, label: str = "") -> CheckpointReport:
+    """Snapshot tile objects (all tile objects when objects is omitted) so rollback can restore them."""
+    result = _addon_api().checkpoint(object_names=objects, label=label)
     return CheckpointReport(
         checkpoint_id=int(result["checkpoint_id"]), objects=tuple(result["objects"])
     )
