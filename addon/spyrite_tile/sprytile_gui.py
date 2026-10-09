@@ -6,7 +6,7 @@ from bpy_extras import view3d_utils
 from math import floor, ceil, copysign
 from bpy.props import *
 from mathutils import Vector, Matrix
-from . import sprytile_utils, sprytile_modal
+from . import sprytile_utils, sprytile_modal, sprytile_builder
 from gpu_extras.batch import batch_for_shader
 from .sprytile_tools.tool_build import ToolBuild
 from .sprytile_tools.tool_paint import ToolPaint
@@ -360,7 +360,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 
             mode = bpy.context.scene.sprytile_data.paint_mode
             if VIEW3D_OP_SprytileGui.build_previews[mode]:
-                sprytile_modal.VIEW3D_OP_SprytileModalTool.verify_bmesh_layers(bmesh.from_edit_mesh(context.object.data))
+                sprytile_builder.TileBuilder.verify_bmesh_layers(bmesh.from_edit_mesh(context.object.data))
                 VIEW3D_OP_SprytileGui.build_previews[mode].build_preview(context, context.scene, ray_origin, ray_vector)
             else:
                 sprytile_preview.set_preview_data(None, None)

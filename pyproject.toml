@@ -1,0 +1,12 @@
+# Virtual uv workspace: dev tooling and the two host-side packages. The Blender
+# add-on itself lives in addon/spyrite_tile and is not a Python package here.
+[tool.uv.workspace]
+members = ["packages/spyrite_tile_ops", "packages/spyrite_tile_gen"]
+# GPU-host service with its own pinned torch stack; synced on that host only.
+exclude = ["services/pixel_server"]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/pure"]

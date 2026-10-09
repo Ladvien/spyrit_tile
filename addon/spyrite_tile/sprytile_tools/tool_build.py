@@ -7,6 +7,7 @@ from .. import sprytile_modal
 from .. import sprytile_utils
 from .. import sprytile_uv
 from .. import sprytile_preview
+from .. import sprytile_builder
 
 class ToolBuild:
     modal = None
@@ -60,11 +61,11 @@ class ToolBuild:
         # If building on decal layer, modify plane normal to the one under mouse
         if data.work_layer == 'DECAL_1' and data.lock_normal is False:
 
-            location, hit_normal, face_index, distance = self.modal.raycast_object(context.object,
+            location, hit_normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object,
                                                                                    ray_origin,
                                                                                    ray_vector)
             if hit_normal is not None:
-                face_up, face_right = sprytile_modal.VIEW3D_OP_SprytileModalTool.get_face_up_vector(context.object, context, face_index, 0.4, bias_right=True)
+                face_up, face_right = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index, 0.4, bias_right=True)
                 if face_up is not None and face_right is not None:
                     plane_normal = hit_normal
                     up_vector = face_up
@@ -159,14 +160,15 @@ class ToolBuild:
             tile_coord = (tile_origin[0] + grid.tile_selection[2],
                           tile_origin[1] + grid.tile_selection[3])
 
-            face_index = self.modal.construct_face(context, origin_coord, [size_x, size_y],
+            face_index = self.modal.builder.construct_face(context, origin_coord, [size_x, size_y],
                                                    tile_coord, tile_origin,
                                                    grid_up, grid_right,
                                                    up_vector, right_vector, plane_normal,
                                                    require_base_layer=require_base_layer,
-                                                   work_layer_mask=work_layer_mask)
+                                                   work_layer_mask=work_layer_mask,
+                                                   grid_origin=scene.cursor.location.copy())
             if face_index is not None:
-                face_verts = self.modal.face_to_world_verts(context, face_index)
+                face_verts = self.modal.builder.face_to_world_verts(context, face_index)
                 faces_verts.extend(face_verts)
         # Build mode without auto join, try operation on each build coordinate
         else:
@@ -182,14 +184,15 @@ class ToolBuild:
                 grid_pos = [grid_coord[0] + grid_offset[0], grid_coord[1] + grid_offset[1]]
                 tile_pos = [tile_xy[0] + tile_offset[0], tile_xy[1] + tile_offset[1]]
 
-                face_index = self.modal.construct_face(context, grid_pos, [1, 1],
+                face_index = self.modal.builder.construct_face(context, grid_pos, [1, 1],
                                                        tile_pos, tile_xy,
                                                        grid_up, grid_right,
                                                        up_vector, right_vector, plane_normal,
                                                        require_base_layer=require_base_layer,
-                                                       work_layer_mask=work_layer_mask)
+                                                       work_layer_mask=work_layer_mask,
+                                                       grid_origin=scene.cursor.location.copy())
                 if face_index is not None:
-                    face_verts = self.modal.face_to_world_verts(context, face_index)
+                    face_verts = self.modal.builder.face_to_world_verts(context, face_index)
                     faces_verts.extend(face_verts)
 
         if plane_pos is not None:
@@ -244,7 +247,7 @@ class ToolBuild:
         up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene, False)
         # Building on decal layer, get from face under mouse
         if data.work_layer == 'DECAL_1' and data.lock_normal is False:
-            location, hit_normal, face_index, distance = sprytile_modal.VIEW3D_OP_SprytileModalTool.raycast_object(context.object,
+            location, hit_normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object,
                                                                                    ray_origin,
                                                                                    ray_vector)
             # For decals, if not hitting the object don't draw preview
@@ -262,7 +265,7 @@ class ToolBuild:
                 sprytile_preview.clear_preview_data()
                 return
 
-            face_up, face_right = sprytile_modal.VIEW3D_OP_SprytileModalTool.get_face_up_vector(context.object, context, face_index, 0.4, bias_right=True)
+            face_up, face_right = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index, 0.4, bias_right=True)
             if face_up is not None and face_right is not None:
                 plane_normal = hit_normal
                 up_vector = face_up

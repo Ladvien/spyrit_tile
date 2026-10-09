@@ -5,7 +5,7 @@ from mathutils import Vector, Matrix, Quaternion
 from .. import sprytile_utils
 from .. import sprytile_uv
 from .. import sprytile_preview
-from .. import sprytile_modal
+from .. import sprytile_builder
 
 
 class ToolPaint:
@@ -82,7 +82,7 @@ class ToolPaint:
         rotate_normal = plane_normal
 
         # Recalculate the rotation normal
-        face_up, face_right = sprytile_modal.VIEW3D_OP_SprytileModalTool.get_face_up_vector(context.object, context, face_index)
+        face_up, face_right = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index)
 
         if face_up is not None and face_right is not None:
             rotate_normal = face_right.cross(face_up)
@@ -123,7 +123,7 @@ class ToolPaint:
         obj = context.object
         # Get the work layer filter, based on layer settings
         work_layer_mask = sprytile_utils.get_work_layer_data(scene.sprytile_data)
-        hit_loc, hit_normal, face_index, hit_dist = self.modal.raycast_object(obj, ray_origin, ray_vector,
+        hit_loc, hit_normal, face_index, hit_dist = sprytile_builder.TileBuilder.raycast_object(obj, ray_origin, ray_vector,
                                                                               work_layer_mask=work_layer_mask)
         if hit_loc is None:
             return
@@ -137,7 +137,7 @@ class ToolPaint:
 
         self.modal.add_virtual_cursor(hit_loc)
         sprytile_uv.apply_uvs(context, face, uvs, target_grid,
-                              self.modal.bmesh, data, target_img,
+                              self.modal.builder.bmesh, data, target_img,
                               tile_xy, origin_xy=tile_xy)
 
     @staticmethod
@@ -146,7 +146,7 @@ class ToolPaint:
         obj = context.object
         # Get the work layer filter, based on layer settings
         work_layer_mask = sprytile_utils.get_work_layer_data(scene.sprytile_data)
-        hit_loc, hit_normal, face_index, hit_dist = sprytile_modal.VIEW3D_OP_SprytileModalTool.raycast_object(obj, ray_origin, ray_vector,
+        hit_loc, hit_normal, face_index, hit_dist = sprytile_builder.TileBuilder.raycast_object(obj, ray_origin, ray_vector,
                                                                               work_layer_mask=work_layer_mask)
         if hit_loc is None:
             sprytile_preview.clear_preview_data()
