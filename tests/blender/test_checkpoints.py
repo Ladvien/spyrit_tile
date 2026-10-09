@@ -37,7 +37,7 @@ def clean_scene():
 
 @pytest.fixture
 def tile_object():
-    api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))
+    assert api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))["reused_material"] is None
     api.create_tile_object(OBJECT, TILESET, 16)
     api.fill_tiles(OBJECT, TILESET, (0, 0), (1, 1), (0, 0))
     return bpy.data.objects[OBJECT]

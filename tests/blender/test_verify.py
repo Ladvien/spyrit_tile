@@ -47,7 +47,7 @@ def clean_scene():
 
 def _board(image, plane="XY", offset=0.0, orientations=False):
     """A 4x4 board on ``plane`` where cell (x, y) shows tile (x, y); optionally turned and mirrored."""
-    api.create_tileset(TILESET, str(image), (16, 16))
+    assert api.create_tileset(TILESET, str(image), (16, 16))["reused_material"] is None
     api.create_tile_object(OBJECT, TILESET, PPU)
     placements = [
         {

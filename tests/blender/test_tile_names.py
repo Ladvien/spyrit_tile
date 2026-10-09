@@ -56,7 +56,9 @@ def named_image(tmp_path):
 
 @pytest.fixture
 def named_tileset(named_image):
-    return api.create_tileset(TILESET, str(named_image), (16, 16))
+    report = api.create_tileset(TILESET, str(named_image), (16, 16))
+    assert report["reused_material"] is None  # a reused material would leave TILESET undefined
+    return report
 
 
 def _geometry(object_name):
@@ -155,6 +157,8 @@ def test_plane_rule_rejects_a_tile_on_a_disallowed_plane(named_tileset):
     # paint_faces has no plane check
     api.fill_tiles(OBJECT, TILESET, [0, 0], [0, 0], "grass")
     api.paint_faces(OBJECT, TILESET, [0], "wall_top")
+    face = api.describe_tile_object(OBJECT)["faces"][0]
+    assert face["tile"] == "wall_top" and face["tile_xy"] == [2, 0]
 
 
 def test_unknown_name_lists_the_known_names(named_tileset):
@@ -191,7 +195,7 @@ def test_exactly_one_of_tile_xy_or_tile(named_tileset):
         )
 
 
-def test_sidecar_errors_carry_a_dotted_path(tmp_path):
+def test_sidecar_errors_name_the_file_and_the_dotted_path(tmp_path):
     image = tmp_path / "bad.png"
     shutil.copy(FIXTURE_IMAGE, image)
     sidecar = tmp_path / "bad.spyrite.yaml"
@@ -205,8 +209,47 @@ def test_sidecar_errors_carry_a_dotted_path(tmp_path):
             api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile": tile}])
         return str(error.value)
 
-    assert attempt("spyrite_tileset: 2\ntiles: {a: {xy: [0, 0]}}\n") == "spyrite_tileset: must be 1"
-    assert attempt("spyrite_tileset: 1\ntiles: {a: {tags: []}}\n").startswith("tiles.a.xy: required")
-    assert attempt("spyrite_tileset: 1\ntiles: {a: {xy: [0, 0], planes: [AB]}}\n").startswith("tiles.a.planes:")
-    assert attempt("spyrite_tileset: 1\ntiles: {a: {xy: [0, 0], color: red}}\n").startswith("tiles.a: unknown keys")
+    prefix = f"{sidecar}: "
+    assert attempt("spyrite_tileset: 2\ntiles: {a: {xy: [0, 0]}}\n") == prefix + "spyrite_tileset: must be 1"
+    assert attempt("spyrite_tileset: 1\ntiles: {a: {tags: []}}\n").startswith(prefix + "tiles.a.xy: required")
+    assert attempt("spyrite_tileset: 1\ntiles: {a: {xy: [0, 0], planes: [AB]}}\n").startswith(prefix + "tiles.a.planes:")
+    assert attempt("spyrite_tileset: 1\ntiles: {a: {xy: [0, 0], color: red}}\n").startswith(prefix + "tiles.a: unknown keys")
+    assert attempt("spyrite_tileset: 1\ntiles: {a: {xy: [0, 0]\n").startswith(prefix + "spyrite_tileset: invalid YAML")
     assert "outside tileset" in attempt("spyrite_tileset: 1\ntiles: {a: {xy: [9, 0]}}\n")
+
+
+def test_malformed_sidecar_fails_create_tileset_before_touching_anything(tmp_path):
+    image = tmp_path / "bad.png"
+    shutil.copy(FIXTURE_IMAGE, image)
+    (tmp_path / "bad.spyrite.yaml").write_text("spyrite_tileset: 2\ntiles: {a: {xy: [0, 0]}}\n", encoding="utf-8")
+    images_before = set(bpy.data.images.keys())
+    entries_before = len(bpy.context.scene.sprytile_mats)
+    with pytest.raises(ValueError, match=r"bad\.spyrite\.yaml: spyrite_tileset: must be 1"):
+        api.create_tileset(TILESET, str(image), (16, 16))
+    assert bpy.data.materials.get(TILESET) is None
+    assert set(bpy.data.images.keys()) == images_before
+    assert len(bpy.context.scene.sprytile_mats) == entries_before
+
+
+def test_sidecar_entries_outside_the_layout_do_not_break_the_tileset(named_image):
+    """One image, one sidecar, two layouts: at 32 px the 2x2 grid has no (2, 0) tile, yet nothing may raise."""
+    report = api.create_tileset(TILESET, str(named_image), (32, 32))
+    assert (report["columns"], report["rows"]) == (2, 2)
+    assert report["tile_names"]["wall_top"]["xy"] == [2, 0]  # listed as written, not filtered
+    api.create_tile_object(OBJECT, TILESET, 16)
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile": "grass"}, {"cell_xy": [1, 0], "tile": [1, 1]}])
+    # read-back is unaffected: names whose tile is not in the layout simply never match
+    faces = sorted(api.describe_tile_object(OBJECT)["faces"], key=lambda f: f["center_m"][0])
+    assert [f["tile"] for f in faces] == ["grass", None]
+    described = [t for t in api.describe_scene()["tilesets"] if t["material_name"] == TILESET][0]
+    assert described["tile_names"] == report["tile_names"]
+    checkpoint = api.checkpoint(None)
+    assert OBJECT in checkpoint["objects"]
+    api.discard_checkpoint(checkpoint["checkpoint_id"])
+    assert api.select_faces(OBJECT, {"tag": "floor"})["count"] == 1
+    # only USING an out-of-range name fails, and the message names the sidecar that defines it
+    with pytest.raises(ValueError) as error:
+        api.place_tiles(OBJECT, TILESET, [{"cell_xy": [2, 0], "tile": "wall_top", "plane": "XZ"}])
+    message = str(error.value)
+    assert str(named_image.with_suffix(".spyrite.yaml")) in message
+    assert "tile 'wall_top'" in message and "is outside tileset" in message
