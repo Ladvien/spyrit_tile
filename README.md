@@ -50,7 +50,14 @@ Three pieces, all in this repository:
 
 Setup: `uv sync --all-packages` (creates `.venv` with `spyrite-tile-gen`), `make install-addon`,
 `make install-blended-plugin` (re-run after any `uv sync` in blended), and blended's own
-`make install-mcp-addon`. `.mcp.json` / `.omp/mcp.json` register both MCP servers.
+`make install-mcp-addon`. `.mcp.json` / `.omp/mcp.json` register the MCP servers.
+
+Dev MCP server `spyrite-tile-dev` (`packages/spyrite_tile_gen/.../devserver.py`): resources
+`spyrite://skills[/{name}]`, `spyrite://scripts[/{name}]`, `spyrite://docs/api`, `spyrite://specs/example`;
+prompts `spyrite_build_scene(brief)` and `spyrite_self_review(object_name)`; tools `list_skills`, `read_skill`,
+`list_scripts`, `run_script(name, args, timeout_s)` over an allowlist (`visual_probe`, `live_smoke`, `test_pure`,
+`test_blender`, `test_gui`, `test_visual`, `test_live`, `gui_check`; `bump_version` and `release` are not exposed).
+The loop an agent follows is the `spyrite-agent-build` skill.
 
 Conventions: `tile_xy` is (column from the left, row from the top) of the tileset image;
 cells are whole tiles, one cell = `tile_size_px / pixels_per_unit_px` metres; planes are `XY`

@@ -12,6 +12,11 @@
         "--exit-on-source-change"
       ]
     },
+    "spyrite-tile-dev": {
+      "type": "stdio",
+      "command": "/Users/ladvien/spyrit_tile/.venv/bin/spyrite-tile-dev",
+      "args": []
+    },
     "spyrite-tile-gen": {
       "type": "stdio",
       "command": "/Users/ladvien/spyrit_tile/.venv/bin/spyrite-tile-gen",

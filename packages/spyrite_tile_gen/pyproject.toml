@@ -12,6 +12,7 @@ dependencies = [
 
 [project.scripts]
 spyrite-tile-gen = "spyrite_tile_gen.server:main"
+spyrite-tile-dev = "spyrite_tile_gen.devserver:main"
 
 [build-system]
 requires = ["hatchling"]
