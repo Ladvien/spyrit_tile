@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/config/mcp-schema.json",
+  "mcpServers": {
+    "blender": {
+      "command": "true",
+      "enabled": false
+    },
+    "blended": {
+      "type": "stdio",
+      "command": "/Users/ladvien/blended/.venv/bin/blender-mcp",
+      "args": [
+        "--exit-on-source-change"
+      ]
+    },
+    "spyrite-tile-gen": {
+      "type": "stdio",
+      "command": "/Users/ladvien/spyrite_tile/.venv/bin/spyrite-tile-gen",
+      "args": [],
+      "env": {
+        "RD_API_KEY": "${RD_API_KEY}",
+        "SPYRITE_OUTPUT_DIR": "/Users/ladvien/spyrite_tile/outputs/generated",
+        "SPYRITE_LOCAL_URL": "http://192.168.1.110:8190"
+      }
+    }
+  }
+}
