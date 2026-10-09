@@ -50,10 +50,12 @@ from mcp.client.stdio import stdio_client
 from PIL import Image, ImageDraw
 
 REPOSITORY = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPOSITORY / "addon" / "spyrite_tile"))
+import spyrite_probe  # noqa: E402  (pure module, no relative imports: the same oracle verify_tile_object uses)
+
 BLENDED_MCP = "/Users/ladvien/blended/.venv/bin/blender-mcp"
 LAYOUT_PATH = "/tmp/spyrite_visual_probe_layout.json"  # Blender runs on this host; blended truncates long prints
 MIN_BOX_PX = 6
-INNER_FRACTION = 0.5
 WORST_CROPS = 4
 CROP_UPSCALE = 8
 
@@ -170,16 +172,11 @@ def _layout(text):
     return json.loads(Path(LAYOUT_PATH).read_text())
 
 
-def _mean(image, box):
-    crop = image.crop(tuple(int(round(v)) for v in box)).convert("RGB")
-    pixels = list(crop.get_flattened_data())
-    return [sum(p[c] for p in pixels) / len(pixels) for c in range(3)]
-
-
-def _inner(box, fraction=INNER_FRACTION):
-    x0, y0, x1, y1 = box
-    dx, dy = (x1 - x0) * (1 - fraction) / 2, (y1 - y0) * (1 - fraction) / 2
-    return (x0 + dx, y0 + dy, x1 - dx, y1 - dy)
+def _picture(image):
+    """A PIL image as the (width, height, rgba floats) tuple spyrite_probe works on."""
+    rgba = image.convert("RGBA")
+    table = [v / 255 for v in range(256)]
+    return (rgba.width, rgba.height, [table[b] for b in rgba.tobytes()])
 
 
 def _covered(point, covers):
@@ -187,30 +184,11 @@ def _covered(point, covers):
     return any(c["x"] <= x <= c["x"] + c["w"] and c["y"] <= y <= c["y"] + c["h"] for c in covers)
 
 
-# Viewed from its normal side, a face's (right, up) axes; the probe views look straight at these.
-
-
-def _turn(quadrants, rotation_deg, flip_x, flip_y):
-    """Contract: turn the 2x2 picture counter-clockwise, then mirror it as seen."""
-    m = [list(line) for line in quadrants]
-    for _ in range(int(rotation_deg) // 90):
-        m = [[m[j][1 - i] for j in range(2)] for i in range(2)]
-    if flip_x:
-        m = [line[::-1] for line in m]
-    if flip_y:
-        m = m[::-1]
-    return m
-
-
-def _quadrant_boxes(box):
-    x0, y0, x1, y1 = box
-    xm, ym = (x0 + x1) / 2, (y0 + y1) / 2
-    return [[(x0, y0, xm, ym), (xm, y0, x1, ym)], [(x0, ym, xm, y1), (xm, ym, x1, y1)]]  # top row first
-
-
 def measure(layout, shot, tileset, tile_size, faces_by_index, placements, tolerance):
     """Per face: the 4 quadrant colours on screen vs the tile's quadrants turned per its placement."""
     scale = shot.width / layout["area"]["w"]
+    shot_picture = _picture(shot)
+    tileset = _picture(tileset)
     region = layout["region"]
     results = []
     for face in layout["faces"]:
@@ -235,12 +213,11 @@ def measure(layout, shot, tileset, tile_size, faces_by_index, placements, tolera
             continue  # a face the caller did not describe cannot be judged
         col, row = info["tile_xy"]
         tile_box = (col * tile_size, row * tile_size, (col + 1) * tile_size, (row + 1) * tile_size)
-        tile_quads = [[_mean(tileset, _inner(b)) for b in line] for line in _quadrant_boxes(tile_box)]
-        expected = _turn(tile_quads, placement.get("rotation_deg", 0),
-                         placement.get("flip_x", False), placement.get("flip_y", False))
-        observed = [[_mean(shot, _inner(b)) for b in line] for line in _quadrant_boxes(box)]
-        delta = max(abs(e - o) for el, ol in zip(expected, observed) for eq, oq in zip(el, ol)
-                    for e, o in zip(eq, oq))
+        expected = spyrite_probe.expected_quadrants(
+            spyrite_probe.crop(tileset, tile_box), placement.get("rotation_deg", 0),
+            placement.get("flip_x", False), placement.get("flip_y", False))
+        observed = spyrite_probe.observed_quadrants(shot_picture, box)
+        delta = spyrite_probe.compare(expected, observed)
         rounded = lambda q: [[[round(v, 1) for v in c] for c in line] for line in q]  # noqa: E731
         results.append(dict(index=face["index"], plane=plane, cell=list(cell), tile_xy=info["tile_xy"],
                             placement=placement, screen_box=[round(v, 1) for v in box],
