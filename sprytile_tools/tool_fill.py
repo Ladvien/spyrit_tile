@@ -3,9 +3,9 @@ import numpy
 from mathutils import Matrix
 from mathutils.geometry import intersect_line_plane
 
-import sprytile_utils
-import sprytile_uv
-from sprytile_uv import UvDataLayers
+from .. import sprytile_utils
+from .. import sprytile_uv
+from ..sprytile_uv import UvDataLayers
 
 class ToolFill:
     modal = None

@@ -1,5 +1,4 @@
 import bpy
-import bgl
 import blf
 import bmesh
 import math
@@ -15,9 +14,8 @@ from mathutils.bvhtree import BVHTree
 from bpy.path import abspath
 from datetime import datetime
 from os import path
-import sprytile_modal
-import sprytile_preview
-import addon_updater_ops
+from . import sprytile_modal
+from . import sprytile_preview
 
 
 def get_build_vertices(position, x_vector, y_vector, up_vector, right_vector):
@@ -40,6 +38,61 @@ def get_build_vertices(position, x_vector, y_vector, up_vector, right_vector):
         face_order = (vtx1, vtx4, vtx3, vtx2)
 
     return face_order
+
+
+def prune_textureless_grids(context):
+    """Drop Sprytile entries for materials that have no image texture node.
+
+    Those cannot act as a tileset, so the entry is dead weight the user cannot
+    get rid of by hand: the "add missing materials" pass in validate_grids
+    recreated it every time. Blender's default "Material" is the usual case.
+
+    Kept separate from validate_grids so it can run on tool start without that
+    operator's side effect of reassigning the object's active grid.
+    """
+    mat_list = bpy.data.materials
+    mat_data_list = context.scene.sprytile_mats
+
+    remove_idx = []
+    for idx, mat_data in enumerate(mat_data_list.values()):
+        mat_idx = mat_list.find(mat_data.mat_id)
+        if mat_idx < 0:
+            continue
+        if get_material_texture_node(mat_list[mat_idx]) is None:
+            remove_idx.append(idx)
+
+    if not remove_idx:
+        return False
+
+    for idx in reversed(remove_idx):
+        mat_data_list.remove(idx)
+    bpy.ops.sprytile.build_grid_list()
+    return True
+
+
+def mouse_over_ui_region(context, event):
+    """True when the cursor sits over one of Blender's own panels.
+
+    With region overlap the WINDOW region runs underneath the toolbar, sidebar
+    and headers, so anything Sprytile draws or handles there would otherwise
+    swallow the clicks meant for their buttons. Window space coordinates are
+    used because every region shares them.
+    """
+    area = context.area
+    if area is None or event is None:
+        return False
+
+    mouse_x, mouse_y = event.mouse_x, event.mouse_y
+    for region in area.regions:
+        if region.type == 'WINDOW':
+            continue
+        # Collapsed regions report a size of 1
+        if region.width <= 1 or region.height <= 1:
+            continue
+        if (region.x <= mouse_x < region.x + region.width and
+                region.y <= mouse_y < region.y + region.height):
+            return True
+    return False
 
 
 def get_ortho2D_matrix(left, right, bottom, top):
@@ -760,11 +813,11 @@ class UTIL_OP_SprytileStartTool(bpy.types.Operator):
         return self.invoke(context, None)
 
     def invoke(self, context, event):
-        if self.mode is 0:
+        if self.mode == 0:
             context.scene.sprytile_data.paint_mode = 'SET_NORMAL'
-        if self.mode is 1:
+        if self.mode == 1:
             context.scene.sprytile_data.paint_mode = 'PAINT'
-        if self.mode is 2:
+        if self.mode == 2:
             context.scene.sprytile_data.paint_mode = 'MAKE_FACE'
         bpy.ops.sprytile.modal_tool('INVOKE_REGION_WIN')
         return {'FINISHED'}
@@ -1120,6 +1173,12 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
             if (mat.mat_id == "Dots Stroke"):
                 remove_idx.append(idx)
                 continue
+            # A material with no image texture node cannot act as a tileset, so
+            # an entry for it is dead weight the user cannot get rid of: it was
+            # recreated by the loop below on every validate.
+            if get_material_texture_node(mat_list[mat_idx]) is None:
+                remove_idx.append(idx)
+                continue
             if mat_list[mat_idx].users == 0:
                 remove_idx.append(idx)
             for grid in mat.grids:
@@ -1138,6 +1197,11 @@ class UTIL_OP_SprytileValidateGridList(bpy.types.Operator):
                 if mat_data.mat_id == mat.name:
                     is_mat_valid = True
                     break
+            # Only materials that carry an image texture node can be tilesets.
+            # Without this every material in the file, including Blender's
+            # default "Material", showed up in the Sprytile list permanently.
+            if get_material_texture_node(mat) is None:
+                continue
             if is_mat_valid is False and mat.name != "Dots Stroke":
                 mat_data_entry = mat_data_list.add()
                 mat_data_entry.mat_id = mat.name
@@ -1190,6 +1254,7 @@ class UTIL_OP_SprytileBuildGridList(bpy.types.Operator):
 class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
     bl_idname = "sprytile.rotate_left"
     bl_label = "Rotate Sprytile Left"
+    bl_description = "Rotate the tile 90 degrees counter clockwise"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -1206,6 +1271,7 @@ class UTIL_OP_SprytileRotateLeft(bpy.types.Operator):
 class UTIL_OP_SprytileRotateRight(bpy.types.Operator):
     bl_idname = "sprytile.rotate_right"
     bl_label = "Rotate Sprytile Right"
+    bl_description = "Rotate the tile 90 degrees clockwise"
 
     def execute(self, context):
         return self.invoke(context, None)
@@ -1297,7 +1363,10 @@ class UTIL_OP_SprytileUpdateCheck(bpy.types.Operator):
     def invoke(self, context, event):
         print("Check itch.io API")
         import sys
-        print(sys.modules['sprytile'].bl_info.get('version', (-1, -1, -1)))
+        # __package__ is the addon package, "sprytile" when installed as a
+        # legacy addon and "bl_ext.<repo>.sprytile" when installed as an extension
+        addon_module = sys.modules[__package__]
+        print(addon_module.bl_info.get('version', (-1, -1, -1)))
         import urllib.request
         import json
         url = "https://itch.io/api/1/x/wharf/latest?game_id=98966&channel_name=addon"
@@ -1315,7 +1384,7 @@ class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
     bl_description = "Duplicate selected faces and flip normals"
 
     def execute(self, context):
-        self.invoke(context, None)
+        return self.invoke(context, None)
 
     def invoke(self, context, event):
         print("Invoked make double sided")
@@ -1335,7 +1404,7 @@ class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
 
         mesh.faces.index_update()
         mesh.faces.ensure_lookup_table()
-        bmesh.update_edit_mesh(context.object.data, True, True)
+        bmesh.update_edit_mesh(context.object.data, loop_triangles=True, destructive=True)
         return {'FINISHED'}
 
 
@@ -1370,6 +1439,10 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
     bl_idname = "sprytile.translate_grid"
     bl_label = "Pixel Translate (Sprytile)"
 
+    # Draw handlers outlive the addon module, keep a class level reference so
+    # unregister() can drop one that is still installed
+    active_draw_handle = None
+
     @staticmethod
     def draw_callback(self, context):
         if self.exec_counter != -1 or self.ref_pos is None:
@@ -1387,7 +1460,7 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
 
         font_id = 0
         font_size = 16
-        blf.size(font_id, font_size, 72)
+        blf.size(font_id, font_size)
 
         readout_axis = ['X', 'Y', 'Z']
         for i in range(3):
@@ -1497,6 +1570,7 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
 
         args = self, context
         self.draw_handle = bpy.types.SpaceView3D.draw_handler_add(self.draw_callback, args, 'WINDOW', 'POST_PIXEL')
+        UTIL_OP_SprytileGridTranslate.active_draw_handle = self.draw_handle
 
         win_mgr = context.window_manager
         self.timer = win_mgr.event_timer_add(0.1, window=context.window)
@@ -1552,6 +1626,7 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
 
         self.bmesh = None
         bpy.types.SpaceView3D.draw_handler_remove(self.draw_handle, 'WINDOW')
+        UTIL_OP_SprytileGridTranslate.active_draw_handle = None
         context.window_manager.event_timer_remove(self.timer)
         return {'FINISHED'}
 
@@ -1561,6 +1636,12 @@ class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
     bl_label = "Snap Cursor (Sprytile)"
 
     def modal(self, context, event):
+        # Leaving edit mode pulls the mesh out from under the raycast
+        if context.object is None or context.object.mode != 'EDIT':
+            context.scene.sprytile_data.is_snapping = False
+            bpy.context.window.cursor_modal_restore()
+            return {'FINISHED'}
+
         if event.type == 'S' and event.value == 'RELEASE':
             context.scene.sprytile_data.is_snapping = False
             bpy.context.window.cursor_modal_restore()
@@ -1901,11 +1982,6 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
         return True
 
     def draw(self, context):
-        # if bpy.app.version > (2, 77, 0):
-        #     addon_updater_ops.check_for_update_background()
-        # else:
-        #     addon_updater_ops.check_for_update_background(context)
-
         layout = self.layout
 
         if hasattr(context.scene, "sprytile_data") is False:
@@ -1946,8 +2022,6 @@ class VIEW3D_PT_SprytileObjectPanel(bpy.types.Panel):
         split = box.split(factor=0.3, align=True)
         split.prop(context.scene.sprytile_data, "auto_reload", toggle=True)
         split.operator("sprytile.reload_imgs")
-
-        # addon_updater_ops.update_notice_box_ui(self, context)
 
 
 class VIEW3D_MT_SprytileWorkDropDown(bpy.types.Menu):
@@ -2013,8 +2087,6 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
             return context.object.mode == 'EDIT'
 
     def draw(self, context):
-        addon_updater_ops.check_for_update_background()
-
         layout = self.layout
 
         if hasattr(context.scene, "sprytile_data") is False:
@@ -2025,13 +2097,8 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
 
         data = context.scene.sprytile_data
 
-        icon_id = "VIEW3D_VEC"
-        # For some reason VIEW3D_VEC does not exist in 2.79?
-        if bpy.app.version > (2, 78, 0):
-            icon_id = "GRID"
-
         row = layout.row(align=False)
-        row.label(text="", icon=icon_id)
+        row.label(text="", icon="GRID")
 
         dropdown_icon = "TRIA_DOWN" if data.axis_plane_settings else "TRIA_RIGHT"
 
@@ -2046,9 +2113,8 @@ class VIEW3D_PT_SprytileWorkflowPanel(bpy.types.Panel):
             layout.prop(data, "axis_plane_size")
 
         row = layout.row(align=True)
-        if bpy.app.version >= (2, 90, 0):
-            row.prop(context.scene.tool_settings, "use_transform_correct_face_attributes", toggle=True, text="", icon="UV")
-            row.separator()
+        row.prop(context.scene.tool_settings, "use_transform_correct_face_attributes", toggle=True, text="", icon="UV")
+        row.separator()
         row.prop(data, "cursor_flow", toggle=True, text="", icon="PIVOT_CURSOR")
         #row.label(text="", icon="SNAP_ON")
         row.prop(data, "cursor_snap", expand=True)
@@ -2104,6 +2170,16 @@ def register():
 
 
 def unregister():
+    # See the comment on active_draw_handle, a leftover handler crashes Blender
+    # once the module it points into is unloaded
+    if UTIL_OP_SprytileGridTranslate.active_draw_handle is not None:
+        try:
+            bpy.types.SpaceView3D.draw_handler_remove(
+                UTIL_OP_SprytileGridTranslate.active_draw_handle, 'WINDOW')
+        except Exception as err:
+            print("Sprytile: could not remove translate draw handler:", err)
+        UTIL_OP_SprytileGridTranslate.active_draw_handle = None
+
     for cl in classes:
         bpy.utils.unregister_class(cl)
 

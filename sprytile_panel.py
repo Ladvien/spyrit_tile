@@ -159,10 +159,13 @@ class VIEW3D_PT_SprytilePanel(bpy.types.Panel):
         row.prop(sprytile_data, "uv_flip_x", toggle=True)
         row.prop(sprytile_data, "uv_flip_y", toggle=True)
 
+        # LOOP_BACK/LOOP_FORWARDS are the curved rotation arrows. The plain
+        # triangles used before read as a number field's spinner rather than as
+        # rotate buttons.
         row = layout.row(align=True)
-        row.operator("sprytile.rotate_left", icon="TRIA_DOWN", text="")
+        row.operator("sprytile.rotate_left", icon="LOOP_BACK", text="")
         row.prop(sprytile_data, "mesh_rotate")
-        row.operator("sprytile.rotate_right", icon="TRIA_UP", text="")
+        row.operator("sprytile.rotate_right", icon="LOOP_FORWARDS", text="")
 
         if sprytile_data.paint_mode == 'PAINT':
             box = layout.box()

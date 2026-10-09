@@ -3,7 +3,7 @@ import math
 import bmesh
 from mathutils import Vector, Matrix
 
-import sprytile_utils
+from . import sprytile_utils
 
 
 class UvDataLayers:
