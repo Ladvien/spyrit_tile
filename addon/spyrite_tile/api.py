@@ -261,7 +261,6 @@ _PLACEMENT_KEYS = frozenset(
         "layer",
     }
 )
-_PLACEMENT_REQUIRED = frozenset({"cell_xy"})
 
 
 # ---------------------------------------------------------------------------
@@ -391,16 +390,13 @@ class _Tileset:
 
     @property
     def names(self):
-        """Tile names from the sidecar next to the image (``{}`` when there is none), loaded once."""
+        """Tile names from the sidecar next to the image (``{}`` when there is none), loaded once.
+
+        Entries are kept as written: the sidecar belongs to the image, not to one tile layout, so entries
+        outside this tileset's grid are not an error here; :func:`_as_tile` range-checks a name when it is used.
+        """
         if self._names is None:
-            self._names = {}
-            path = self.sidecar
-            if os.path.isfile(path):
-                with open(path, encoding="utf-8") as handle:
-                    names = spyrite_spec.load_tile_names(handle.read())
-                for name, entry in names.items():
-                    self.check_tile(f"{path}: tiles.{name}.xy", entry["xy"], (1, 1))
-                self._names = names
+            self._names = _load_sidecar(bpy.path.abspath(self.image.filepath))
         return self._names
 
     @property
@@ -408,11 +404,27 @@ class _Tileset:
         return spyrite_spec.sidecar_path(bpy.path.abspath(self.image.filepath))
 
     def tile_names(self):
-        """``{name: {xy, planes, tags}}`` as plain copies, safe to hand to callers."""
+        """``{name: {xy, planes, tags}}`` as plain copies, safe to hand to callers.
+
+        Lists every sidecar entry, including entries whose ``xy`` lies outside this tileset's layout (a
+        sidecar describes the image, which may be loaded with several layouts); using such a name fails.
+        """
         return {
             name: {"xy": list(e["xy"]), "planes": None if e["planes"] is None else list(e["planes"]), "tags": list(e["tags"])}
             for name, e in self.names.items()
         }
+
+
+def _load_sidecar(image_path):
+    """Parse the tile-name sidecar of ``image_path`` (``{}`` when there is none); errors name the file."""
+    path = spyrite_spec.sidecar_path(image_path)
+    if not os.path.isfile(path):
+        return {}
+    with open(path, encoding="utf-8") as handle:
+        try:
+            return spyrite_spec.load_tile_names(handle.read())
+        except spyrite_spec.SpecError as error:
+            raise spyrite_spec.SpecError(f"{path}: {error}") from None
 
 
 def _as_tile(tileset, label, value, plane=None):
@@ -434,6 +446,7 @@ def _as_tile(tileset, label, value, plane=None):
             raise ValueError(
                 f"{label}: tile {value!r} is not allowed on plane {plane} (allowed: {', '.join(entry['planes'])})"
             )
+        tileset.check_tile(f"{label} (tile {value!r} from {tileset.sidecar})", entry["xy"], (1, 1))
         return tuple(entry["xy"])
     tile_xy = _as_int_tuple(label, value, 2)
     tileset.check_tile(label, tile_xy, (1, 1))
@@ -486,7 +499,10 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
     uses the same image file with the same tile size, padding and margin, no material is created and that
     tileset is returned with ``reused_material`` set to its name. Always use the returned ``material_name``
     afterwards. Returns ``{material_name, image_name, image_size_px, tile_size_px, columns, rows, grid_id,
-    reused_material}`` (``reused_material`` is ``None`` unless an existing tileset was reused).
+    reused_material, tile_names}`` (``reused_material`` is ``None`` unless an existing tileset was reused;
+    ``tile_names`` is every entry of the image's ``<image>.spyrite.yaml`` sidecar, ``{}`` without one).
+    A malformed sidecar raises ``SpecError`` naming the file before anything is created; sidecar entries
+    outside this layout are listed but fail only when used (see ``place_tiles``).
     """
     _as_name("material_name", material_name)
     if not isinstance(image_path, (str, os.PathLike)):
@@ -499,6 +515,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
     tile_size = _as_int_tuple("tile_size_px", tile_size_px, 2, minimum=1)
     padding = _as_int_tuple("padding_px", padding_px, 2, minimum=0)
     margin = _as_int_tuple("margin_px", margin_px, 4, minimum=0)
+    _load_sidecar(image_path)  # a bad sidecar must fail before any datablock exists
 
     scene = bpy.context.scene
     sprytile_core.ensure_scene_setup(scene)
@@ -638,8 +655,10 @@ def create_overlay_object(name, base_object_name, material_name, lift_m=0.002):
         raise ValueError(f"Object {name!r} is already an overlay of {existing.get(OVERLAY_OF_PROP)!r}")
     report = create_tile_object(name, material_name, _object_pixels_per_unit(base, bpy.context.scene))
     obj = bpy.data.objects[report["object_name"]]
-    obj.parent = base
-    obj.matrix_parent_inverse = base.matrix_world.inverted()
+    if obj.parent is not base:
+        # Re-running on an attached overlay must not reset the parent inverse: the base may have moved
+        obj.parent = base
+        obj.matrix_parent_inverse = base.matrix_world.inverted()
     obj[OVERLAY_OF_PROP] = base.name
     obj[OVERLAY_LIFT_PROP] = lift
     report["overlay_of"] = base.name

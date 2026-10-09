@@ -47,10 +47,22 @@ def test_same_image_and_layout_reuses_the_first_material():
     api.create_tile_object(PREFIX + "obj", second["material_name"], 16)
 
 
-def test_different_layout_gets_its_own_material(tmp_path):
-    # a copy without the fixture's tile-name sidecar, which only fits 16 px tiles
-    image = tmp_path / "tiles.png"
-    image.write_bytes(FIXTURE_IMAGE.read_bytes())
+def test_same_file_under_a_different_path_spelling_reuses_the_material(tmp_path):
+    first = api.create_tileset(PREFIX + "a", str(FIXTURE_IMAGE), (16, 16))
+    dotted = FIXTURE_IMAGE.parent / ".." / FIXTURE_IMAGE.parent.name / FIXTURE_IMAGE.name
+    link = tmp_path / "linked.png"
+    link.symlink_to(FIXTURE_IMAGE)
+    for index, spelling in enumerate((dotted, link)):
+        again = api.create_tileset(PREFIX + f"v{index}", str(spelling), (16, 16))
+        assert again["reused_material"] == PREFIX + "a", spelling
+        assert again["grid_id"] == first["grid_id"]
+        assert bpy.data.materials.get(PREFIX + f"v{index}") is None
+    assert [e for e in _entries() if e.startswith(PREFIX)] == [PREFIX + "a"]
+
+
+def test_different_layout_gets_its_own_material():
+    # the fixture's sidecar describes 16 px tiles; loading the image at 32 px must still work
+    image = FIXTURE_IMAGE
     api.create_tileset(PREFIX + "a", str(image), (16, 16))
     other = api.create_tileset(PREFIX + "b", str(image), (32, 32))
     assert other["reused_material"] is None
@@ -107,6 +119,15 @@ def test_gui_load_tileset_twice_on_two_objects_makes_one_material():
     assert bpy.ops.sprytile.tileset_new(filepath=str(FIXTURE_IMAGE)) == {'FINISHED'}
     assert len(second.material_slots) == 1
     assert [m.name for m in bpy.data.materials if m.name.startswith(stem)] == [stem]
+
+
+    # the sidecar names a tile outside the 32 px layout (a 2x2 grid); reading back must not fail
+    object_name = second.name
+    api.create_tile_object(object_name, material.name, 16)
+    api.place_tiles(object_name, material.name, [{"cell_xy": [0, 0], "tile_xy": [1, 1]}])
+    assert api.describe_tile_object(object_name)["faces"][0]["tile_xy"] == [1, 1]
+    tileset = next(t for t in api.describe_scene()["tilesets"] if t["material_name"] == stem)
+    assert tileset["tile_size_px"] == [32, 32] and "wall_top" in tileset["tile_names"]
 
 
 def test_gui_reuse_syncs_the_grid_list_highlight(tmp_path):

@@ -47,7 +47,8 @@ def clean_scene():
 
 @pytest.fixture
 def tile_object():
-    api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))
+    # a reused material would leave TILESET undefined: fail here, not in create_tile_object
+    assert api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))["reused_material"] is None
     api.create_tile_object(OBJECT, TILESET, PPU)
     return bpy.data.objects[OBJECT]
 
@@ -195,3 +196,15 @@ def test_describe_scene_lists_tileset_and_object(tile_object):
     assert scene["removed_tilesets"] == []
     assert set(scene["settings"]) == {"world_pixels", "mesh_decal_offset", "auto_merge"}
     assert scene["settings"]["mesh_decal_offset"] == pytest.approx(0.002)
+
+
+def test_sidecar_that_does_not_fit_the_layout_still_reads_back():
+    """The fixture's sidecar names (2, 0), which a 32 px layout of the 64 px image does not have."""
+    assert api.create_tileset(TILESET, str(FIXTURE_IMAGE), (32, 32))["reused_material"] is None
+    api.create_tile_object(OBJECT, TILESET, PPU)
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile": "grass"}, {"cell_xy": [1, 0], "tile_xy": [1, 1]}])
+    faces = sorted(api.describe_tile_object(OBJECT)["faces"], key=lambda f: f["cell_xy"])
+    assert [(f["tile_xy"], f["tile"]) for f in faces] == [([0, 0], "grass"), ([1, 1], None)]
+    tileset = next(t for t in api.describe_scene()["tilesets"] if t["material_name"] == TILESET)
+    assert (tileset["columns"], tileset["rows"]) == (2, 2)
+    assert tileset["tile_names"]["wall_top"]["xy"] == [2, 0]

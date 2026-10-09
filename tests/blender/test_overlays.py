@@ -39,7 +39,7 @@ def clean_scene():
 
 @pytest.fixture
 def pair():
-    api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))
+    assert api.create_tileset(TILESET, str(FIXTURE_IMAGE), (16, 16))["reused_material"] is None
     api.create_tile_object(BASE, TILESET, PPU)
     report = api.create_overlay_object(OVERLAY, BASE, TILESET)
     return report
@@ -89,6 +89,20 @@ def test_yz_overlay_and_custom_lift(pair):
 def test_remove_tiles_takes_base_offset_on_overlay(pair):
     api.fill_tiles(OVERLAY, TILESET, (0, 0), (1, 1), (1, 0), plane="XZ", plane_offset_m=4.0)
     assert api.remove_tiles(OVERLAY, "XZ", 4.0, [(0, 0)]) == {"removed": 1, "face_count": 3}
+
+
+def test_recreating_an_overlay_keeps_it_attached_after_the_base_moved(pair):
+    api.place_tiles(BASE, TILESET, [{"cell_xy": (0, 0), "tile_xy": (0, 0)}])
+    api.place_tiles(OVERLAY, TILESET, [{"cell_xy": (0, 0), "tile_xy": (1, 0)}])
+    bpy.data.objects[BASE].location.z = 1.0
+    bpy.context.view_layer.update()
+    assert _world_coords(OVERLAY, 2) == pytest.approx([1.002], abs=TOL)
+    report = api.create_overlay_object(OVERLAY, BASE, TILESET)
+    assert report["overlay_of"] == BASE
+    bpy.context.view_layer.update()
+    assert bpy.data.objects[OVERLAY].parent is bpy.data.objects[BASE]
+    assert _world_coords(BASE, 2) == pytest.approx([1.0], abs=TOL)
+    assert _world_coords(OVERLAY, 2) == pytest.approx([1.002], abs=TOL)
 
 
 def test_overlay_errors(pair):

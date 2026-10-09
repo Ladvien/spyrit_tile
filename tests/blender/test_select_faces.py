@@ -49,7 +49,7 @@ def clean_scene():
 
 
 def _board(image=FIXTURE_IMAGE):
-    api.create_tileset(TILESET, str(image), (16, 16))
+    assert api.create_tileset(TILESET, str(image), (16, 16))["reused_material"] is None
     api.create_tile_object(OBJECT, TILESET, 16)
     api.fill_tiles(OBJECT, TILESET, (0, 0), (5, 5), A)
     api.fill_tiles(OBJECT, TILESET, (2, 2), (3, 3), B)
