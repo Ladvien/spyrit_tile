@@ -7,7 +7,7 @@ import bpy
 import pytest
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
-sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
 PREFIX = "overlay_test_"
@@ -27,7 +27,7 @@ def _remove_test_data():
         bpy.data.materials.remove(material)
     if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)
@@ -96,3 +96,30 @@ def test_overlay_errors(pair):
         api.create_overlay_object(PREFIX + "x", BASE, TILESET, lift_m=0)
     with pytest.raises(ValueError, match="different from its base"):
         api.create_overlay_object(BASE, BASE, TILESET)
+
+
+def test_fill_pattern_on_overlay_lands_lifted(pair):
+    api.fill_pattern(
+        OVERLAY,
+        TILESET,
+        {"kind": "random", "tiles": [[0, 0], [1, 0]], "seed": 7},
+        cell_min_xy=(0, 0),
+        cell_max_xy=(2, 2),
+    )
+    assert len(bpy.data.objects[OVERLAY].data.polygons) == 9
+    assert _world_coords(OVERLAY, 2) == pytest.approx([0.002], abs=TOL)
+    assert {f["plane_offset_m"] for f in api.describe_tile_object(OVERLAY)["faces"]} == {0.002}
+
+
+def test_verify_base_passes_with_overlay_present_and_hidden(pair):
+    api.fill_tiles(BASE, TILESET, (0, 0), (3, 3), (0, 0))
+    api.fill_tiles(OVERLAY, TILESET, (0, 0), (3, 3), (1, 0))
+    overlay = bpy.data.objects[OVERLAY]
+    for hidden in (False, True):
+        overlay.hide_render = hidden
+        overlay.hide_viewport = hidden
+        result = api.verify_tile_object(BASE, view="top")
+        assert result["ok"] is True and result["measured"] == 16, result
+    # the overlay itself verifies too: it is its own tile object, lifted 2 mm off the base
+    overlay.hide_render = overlay.hide_viewport = False
+    assert api.verify_tile_object(OVERLAY, view="top")["ok"] is True
