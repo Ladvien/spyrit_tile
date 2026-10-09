@@ -3,7 +3,7 @@ import numpy
 from mathutils import Matrix
 from mathutils.geometry import intersect_line_plane
 
-from .. import sprytile_utils
+from .. import sprytile_core
 from .. import sprytile_uv
 from ..sprytile_uv import UvDataLayers
 
@@ -46,14 +46,14 @@ class ToolFill:
         pass
 
     def execute_fill(self, context, scene, ray_origin, ray_vector):
-        up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene, with_rotation=False)
+        up_vector, right_vector, plane_normal = sprytile_core.get_current_grid_vectors(scene, with_rotation=False)
 
         # Intersect on the virtual plane
         plane_hit = intersect_line_plane(ray_origin, ray_origin + ray_vector, scene.cursor.location, plane_normal)
         # Didn't hit the plane exit
         if plane_hit is None:
             return
-        grid = sprytile_utils.get_grid(context, context.object.sprytile_gridid)
+        grid = sprytile_core.get_grid(context, context.object.sprytile_gridid)
         sprytile_data = scene.sprytile_data
 
         world_pixels = sprytile_data.world_pixels
@@ -61,7 +61,7 @@ class ToolFill:
         grid_y = grid.grid[1]
 
         # Find the position of the plane hit, in terms of grid coordinates
-        hit_coord, grid_right, grid_up = sprytile_utils.get_grid_pos(
+        hit_coord, grid_right, grid_up = sprytile_core.get_grid_pos(
             plane_hit, scene.cursor.location,
             right_vector.copy(), up_vector.copy(),
             world_pixels, grid_x, grid_y, as_coord=True
@@ -70,7 +70,7 @@ class ToolFill:
         # Check hit_coord is inside the work plane grid
         plane_size = sprytile_data.fill_plane_size
 
-        grid_min, grid_max = sprytile_utils.get_workplane_area(plane_size[0], plane_size[1])
+        grid_min, grid_max = sprytile_core.get_workplane_area(plane_size[0], plane_size[1])
 
         x_offset = 1
         if plane_size[0] % 2 == 1:
@@ -83,7 +83,7 @@ class ToolFill:
             return
 
         # Build the fill map
-        sel_coords, sel_size, sel_ids = sprytile_utils.get_grid_selection_ids(context, grid)
+        sel_coords, sel_size, sel_ids = sprytile_core.get_grid_selection_ids(context, grid)
         fill_map, face_idx_array = self.build_fill_map(context, grid_up, grid_right, plane_normal,
                                                        plane_size, grid_min, grid_max, sel_ids)
 
@@ -95,7 +95,7 @@ class ToolFill:
         paint_setting_layer = self.modal.builder.bmesh.faces.layers.int.get(UvDataLayers.PAINT_SETTINGS)
 
         # Get vectors again, to apply tile rotations in UV stage
-        up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene)
+        up_vector, right_vector, plane_normal = sprytile_core.get_current_grid_vectors(scene)
 
         # Get the content in hit coordinate
         hit_coord_content = int(fill_map[hit_array_coord[1]][hit_array_coord[0]])
@@ -113,7 +113,7 @@ class ToolFill:
                     paint_setting_cache[idx] = face[paint_setting_layer]
 
         # Get the work layer filter, based on layer settings
-        work_layer_mask = sprytile_utils.get_work_layer_data(sprytile_data)
+        work_layer_mask = sprytile_core.get_work_layer_data(sprytile_data)
         require_base_layer = sprytile_data.work_layer != 'BASE'
 
         origin_xy = (grid.tile_selection[0], grid.tile_selection[1])
@@ -124,7 +124,7 @@ class ToolFill:
             if paint_setting_cache is not None:
                 paint_setting = paint_setting_cache[idx]
                 if paint_setting is not None:
-                    sprytile_utils.from_paint_settings(data, paint_setting)
+                    sprytile_core.from_paint_settings(data, paint_setting)
 
             # Convert map coord to grid coord
             grid_coord = [grid_min[0] + cell_coord[0],

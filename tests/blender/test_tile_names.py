@@ -11,7 +11,7 @@ import bpy
 import pytest
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
-sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
 PREFIX = "names_test_"
@@ -36,7 +36,7 @@ def _remove_test_data():
         bpy.data.materials.remove(material)
     if bpy.context.object is not None and bpy.context.object.mode != "OBJECT":
         bpy.ops.object.mode_set(mode="OBJECT")
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)

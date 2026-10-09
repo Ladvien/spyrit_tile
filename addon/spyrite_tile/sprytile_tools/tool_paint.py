@@ -2,7 +2,7 @@ import bpy
 import bmesh
 from mathutils import Vector, Matrix, Quaternion
 
-from .. import sprytile_utils
+from .. import sprytile_core
 from .. import sprytile_uv
 from .. import sprytile_preview
 from .. import sprytile_builder
@@ -48,16 +48,16 @@ class ToolPaint:
         data = scene.sprytile_data
 
         grid_id = obj.sprytile_gridid
-        target_grid = sprytile_utils.get_grid(context, grid_id)
+        target_grid = sprytile_core.get_grid(context, grid_id)
 
         if target_grid is None:
             return None, None, None, None, None, None, None
 
-        target_img = sprytile_utils.get_grid_texture(obj, target_grid)
+        target_img = sprytile_core.get_grid_texture(obj, target_grid)
         if target_img is None:
             return None, None, None, None, None, None, None
 
-        up_vector, right_vector, plane_normal = sprytile_utils.get_current_grid_vectors(scene, False)
+        up_vector, right_vector, plane_normal = sprytile_core.get_current_grid_vectors(scene, False)
 
         face_verts = []
         mesh = bmesh.from_edit_mesh(context.object.data)
@@ -101,7 +101,7 @@ class ToolPaint:
 
         tile_xy = (target_grid.tile_selection[0], target_grid.tile_selection[1])
 
-        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_utils.get_grid_area(
+        offset_tile_id, offset_grid, coord_min, coord_max = sprytile_core.get_grid_area(
             target_grid.tile_selection[2],
             target_grid.tile_selection[3],
             data.uv_flip_x,
@@ -122,7 +122,7 @@ class ToolPaint:
         # Raycast the object
         obj = context.object
         # Get the work layer filter, based on layer settings
-        work_layer_mask = sprytile_utils.get_work_layer_data(scene.sprytile_data)
+        work_layer_mask = sprytile_core.get_work_layer_data(scene.sprytile_data)
         hit_loc, hit_normal, face_index, hit_dist = sprytile_builder.TileBuilder.raycast_object(obj, ray_origin, ray_vector,
                                                                               work_layer_mask=work_layer_mask)
         if hit_loc is None:
@@ -145,7 +145,7 @@ class ToolPaint:
         # Raycast the object
         obj = context.object
         # Get the work layer filter, based on layer settings
-        work_layer_mask = sprytile_utils.get_work_layer_data(scene.sprytile_data)
+        work_layer_mask = sprytile_core.get_work_layer_data(scene.sprytile_data)
         hit_loc, hit_normal, face_index, hit_dist = sprytile_builder.TileBuilder.raycast_object(obj, ray_origin, ray_vector,
                                                                               work_layer_mask=work_layer_mask)
         if hit_loc is None:

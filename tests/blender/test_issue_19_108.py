@@ -20,7 +20,7 @@ import pytest
 from mathutils import Euler, Matrix, Quaternion, Vector
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
-sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 sprytile_builder = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_builder")
 tool_paint = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_tools.tool_paint")
 
@@ -44,7 +44,7 @@ def _remove_test_data():
         bpy.data.meshes.remove(mesh)
     for material in [m for m in bpy.data.materials if m.name.startswith(PREFIX)]:
         bpy.data.materials.remove(material)
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)

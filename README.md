@@ -101,7 +101,7 @@ Tests: `make test-pure` (generation package), `make blender-test-deps && make te
 `tests/gui/run_gui_smoke.sh` (drives the interactive tools in a GUI Blender with simulated input).
 `make test-live` drives the Blender you have open through blended's MCP server (the agent's own path),
 builds `spyrite_smoke_room`, asserts its faces and tiles and saves a window screenshot to
-`outputs/live_smoke/`; `ARGS=--reload-api` picks up `sprytile_uv.py`, `sprytile_builder.py` and `api.py` edits without a restart.
+`outputs/live_smoke/`; `ARGS=--reload-api` picks up `sprytile_core.py`, `sprytile_uv.py`, `sprytile_builder.py`, `spyrite_spec.py`, `spyrite_probe.py` and `api.py` edits (an agent does the same with the `reload_core` op) without a restart.
 `make test-visual` (after `make test-live`) is a pixel oracle: it isolates a tile object, looks at it
 orthographically, screenshots the viewport and checks every visible face's colour against its tile in
 the tileset image (`scripts/visual_probe.py`; evidence in `outputs/visual_probe/`). The same comparison

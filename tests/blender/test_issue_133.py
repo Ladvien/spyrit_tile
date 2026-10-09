@@ -15,6 +15,7 @@ import pytest
 
 api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
 sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
+sprytile_core = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_core")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
 OTHER_IMAGE = FIXTURE_IMAGE.with_name("tiles_oriented_16px.png")
@@ -32,7 +33,7 @@ def _remove_test_data():
         bpy.data.meshes.remove(mesh)
     for material in [m for m in bpy.data.materials if m.name.startswith(PREFIX)]:
         bpy.data.materials.remove(material)
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
 
 
 @pytest.fixture(autouse=True)
@@ -67,7 +68,7 @@ def test_removing_the_last_grid_removes_the_tileset_but_keeps_material_and_image
     obj = _make(TILESET_A, OBJECT_A)
     _activate(obj)
     material = bpy.data.materials[TILESET_A]
-    image = sprytile_utils.get_material_texture(material)
+    image = sprytile_core.get_material_texture(material)
     assert _mat_ids().count(TILESET_A) == 1
     assert (TILESET_A, -1) in _display()
 
@@ -77,7 +78,7 @@ def test_removing_the_last_grid_removes_the_tileset_but_keeps_material_and_image
     assert all(mat_id != TILESET_A for mat_id, _ in _display())
     assert _display() == []
     assert obj.sprytile_gridid == -1
-    assert sprytile_utils.get_grid(bpy.context, obj.sprytile_gridid) is None
+    assert sprytile_core.get_grid(bpy.context, obj.sprytile_gridid) is None
     # nothing of the user's data is deleted
     assert bpy.data.materials.get(TILESET_A) is material
     assert bpy.data.images.get(image.name) is image
@@ -90,10 +91,10 @@ def test_validate_does_not_list_the_removed_tileset_again():
     material = bpy.data.materials[TILESET_A]
     # The object still uses the material and it has an image texture: exactly what made
     # validate_grids re-add it before.
-    assert material.users > 0 and sprytile_utils.get_material_texture_node(material) is not None
+    assert material.users > 0 and sprytile_core.get_material_texture_node(material) is not None
     bpy.ops.sprytile.grid_remove()
 
-    sprytile_utils.validate_grids(bpy.context.scene)
+    sprytile_core.validate_grids(bpy.context.scene)
     assert TILESET_A not in _mat_ids()
     assert bpy.ops.sprytile.validate_grids() == {'FINISHED'}
     assert TILESET_A not in _mat_ids()
@@ -109,7 +110,7 @@ def test_create_tileset_lists_a_removed_tileset_again():
     api.create_tileset(TILESET_A, str(FIXTURE_IMAGE), (16, 16))
     assert _mat_ids().count(TILESET_A) == 1
     api.create_tile_object(OBJECT_A, TILESET_A, 16)  # builds on the re-listed grid
-    assert sprytile_utils.get_grid(bpy.context, obj.sprytile_gridid).mat_id == TILESET_A
+    assert sprytile_core.get_grid(bpy.context, obj.sprytile_gridid).mat_id == TILESET_A
 
 
 def test_other_tilesets_and_objects_survive_and_dangling_grid_ids_are_repointed():
@@ -141,17 +142,17 @@ def test_other_tilesets_and_objects_survive_and_dangling_grid_ids_are_repointed(
 def test_removing_one_of_several_grids_keeps_the_tileset():
     obj = _make(TILESET_A, OBJECT_A)
     _activate(obj)
-    mat_data = sprytile_utils.get_mat_data(bpy.context, TILESET_A)
+    mat_data = sprytile_core.get_mat_data(bpy.context, TILESET_A)
     first_id = mat_data.grids[0].id
     assert bpy.ops.sprytile.grid_add() == {'FINISHED'}
-    mat_data = sprytile_utils.get_mat_data(bpy.context, TILESET_A)
+    mat_data = sprytile_core.get_mat_data(bpy.context, TILESET_A)
     assert len(mat_data.grids) == 2
     second_id = mat_data.grids[1].id
     obj.sprytile_gridid = second_id
 
     assert bpy.ops.sprytile.grid_remove() == {'FINISHED'}
 
-    mat_data = sprytile_utils.get_mat_data(bpy.context, TILESET_A)
+    mat_data = sprytile_core.get_mat_data(bpy.context, TILESET_A)
     assert mat_data is not None
     assert [g.id for g in mat_data.grids] == [first_id]
     assert (TILESET_A, -1) in _display() and (TILESET_A, first_id) in _display()

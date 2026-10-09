@@ -13,8 +13,8 @@ and Spyrite Tile enabled (`make install-addon`); the plugin installed into blend
 (`make install-blended-plugin`). Run with `make test-live`. Exit code 0 means every check passed.
 
 It edits the open scene (adds or rebuilds `spyrite_smoke_room`); nothing else is touched.
-Edits to the add-on need a Blender restart, except `sprytile_uv`, `sprytile_builder`, `spyrite_probe` and `api`: they
-register no classes, and `--reload-api` reloads them in that order.
+Edits to the add-on need a Blender restart, except `sprytile_core`, `sprytile_uv`, `sprytile_builder`, `spyrite_spec`, `spyrite_probe` and `api`: they register
+no classes, and `--reload-api` reloads them in that order (as does `api.reload_core`).
 """
 
 import asyncio
@@ -58,9 +58,13 @@ for name in ({ROOM!r}, {BOARD!r}, *{tuple(n for n, _ in ORIENT_BOARDS.values())!
     if o is not None:
         bpy.data.objects.remove(o)
 """
-RELOAD_API = """import importlib
-for name in ('sprytile_uv', 'sprytile_builder', 'spyrite_probe', 'api'):
-    importlib.reload(importlib.import_module('bl_ext.user_default.spyrite_tile.' + name))
+RELOAD_API = """import importlib, sys
+for name in ('sprytile_core', 'sprytile_uv', 'sprytile_builder', 'spyrite_spec', 'spyrite_probe', 'api'):
+    full = 'bl_ext.user_default.spyrite_tile.' + name
+    if full in sys.modules:
+        importlib.reload(sys.modules[full])
+    else:
+        importlib.import_module(full)
 """
 FRAME_ROOM = f"""import bpy, math
 from mathutils import Euler, Vector

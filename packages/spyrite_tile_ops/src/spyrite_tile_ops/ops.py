@@ -60,6 +60,7 @@ __all__ = [
     "build_spec",
     "export_spec",
     "verify_tile_object",
+    "reload_core",
 ]
 
 
@@ -340,6 +341,13 @@ class VerifyReport:
     max_channel_delta: float
     evidence_dir: str
     render_path: str
+
+
+@dataclass(frozen=True)
+class ReloadReport:
+    """Add-on modules reloaded by reload_core, in order."""
+
+    reloaded: tuple[str, ...]
 
 
 # --- plumbing -------------------------------------------------------------
@@ -873,3 +881,9 @@ def verify_tile_object(
         evidence_dir=result["evidence_dir"],
         render_path=result["render_path"],
     )
+
+
+@op()
+def reload_core() -> ReloadReport:
+    """Reload the add-on's class-free modules (core, uv, builder, spec, probe, api) so edits apply without restarting Blender."""
+    return ReloadReport(reloaded=tuple(_addon_api().reload_core()["reloaded"]))
