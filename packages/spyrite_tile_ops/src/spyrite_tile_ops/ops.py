@@ -40,6 +40,7 @@ ADDON_NOT_ENABLED_MESSAGE = (
     "`make install-addon` in /Users/ladvien/spyrit_tile and restart Blender."
 )
 ALLOWED_ROTATIONS_DEG = (0, 90, 180, 270)
+VERIFY_DEFAULT_TOLERANCE = 12.0
 
 __all__ = [
     "import_tileset",
@@ -841,17 +842,18 @@ def export_spec(objects: list[str], spec_path: Path) -> SpecExportReport:
 def verify_tile_object(
     object_name: str,
     view: Literal["auto", "top", "front", "right"] = "auto",
-    tolerance: float = 12.0,
+    tolerance: float | None = None,
     evidence_dir: Path | None = None,
 ) -> VerifyReport:
     """Render a tile object with Workbench and check every visible face shows its tile (pixel oracle).
 
     Reads only: the scene is unchanged afterwards; the render is written to `evidence_dir`/render.png.
+    `tolerance` is the largest accepted colour difference per channel (0-255); None means 12.
     """
     result = _addon_api().verify_tile_object(
         object_name=object_name,
         view=view,
-        tolerance=tolerance,
+        tolerance=VERIFY_DEFAULT_TOLERANCE if tolerance is None else tolerance,
         evidence_dir=None if evidence_dir is None else str(evidence_dir),
     )
     return VerifyReport(
