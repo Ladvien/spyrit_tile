@@ -321,7 +321,7 @@ class TileFaceSelection:
 class CheckpointReport:
     """A checkpoint just taken: its id and the objects it covers."""
 
-    checkpoint_id: int
+    checkpoint_id: str
     objects: tuple[str, ...]
 
 
@@ -329,7 +329,7 @@ class CheckpointReport:
 class RollbackReport:
     """The objects restored from a checkpoint (the checkpoint stays available)."""
 
-    checkpoint_id: int
+    checkpoint_id: str
     restored: tuple[str, ...]
 
 
@@ -337,7 +337,7 @@ class RollbackReport:
 class CheckpointSummary:
     """One live checkpoint; `created` is an ISO-8601 UTC timestamp."""
 
-    checkpoint_id: int
+    checkpoint_id: str
     label: str
     created: str
     objects: tuple[str, ...]
@@ -354,7 +354,7 @@ class CheckpointListing:
 class DiscardReport:
     """The checkpoint removed and the objects it covered."""
 
-    checkpoint_id: int
+    checkpoint_id: str
     discarded: tuple[str, ...]
 
 
@@ -854,7 +854,7 @@ def scene_report() -> SceneReading:
 
 
 def _checkpoint_number(checkpoint_id: str) -> int:
-    """The checkpoint id as an int; ids travel as text because blended reserves bare numeric parameters for quantities."""
+    """The checkpoint id as an int; ids travel as text (reports and parameters alike) because blended reserves bare numeric parameters for quantities."""
     try:
         return int(checkpoint_id)
     except (TypeError, ValueError):
@@ -867,7 +867,7 @@ def checkpoint(objects: list[str] | None = None, label: str = "") -> CheckpointR
     """Snapshot tile objects (all tile objects when objects is omitted) so rollback can restore them."""
     result = _addon_api().checkpoint(object_names=objects, label=label)
     return CheckpointReport(
-        checkpoint_id=int(result["checkpoint_id"]), objects=tuple(result["objects"])
+        checkpoint_id=str(result["checkpoint_id"]), objects=tuple(result["objects"])
     )
 
 
@@ -875,7 +875,7 @@ def rollback(checkpoint_id: str) -> RollbackReport:
     """Restore every object of a checkpoint (mesh, grid, materials, transform); the checkpoint stays usable."""
     result = _addon_api().rollback(checkpoint_id=_checkpoint_number(checkpoint_id))
     return RollbackReport(
-        checkpoint_id=int(result["checkpoint_id"]), restored=tuple(result["restored"])
+        checkpoint_id=str(result["checkpoint_id"]), restored=tuple(result["restored"])
     )
 
 
@@ -883,7 +883,7 @@ def discard_checkpoint(checkpoint_id: str) -> DiscardReport:
     """Forget a checkpoint and delete its hidden mesh copies."""
     result = _addon_api().discard_checkpoint(checkpoint_id=_checkpoint_number(checkpoint_id))
     return DiscardReport(
-        checkpoint_id=int(result["checkpoint_id"]), discarded=tuple(result["discarded"])
+        checkpoint_id=str(result["checkpoint_id"]), discarded=tuple(result["discarded"])
     )
 
 
@@ -893,7 +893,7 @@ def list_checkpoints() -> CheckpointListing:
     return CheckpointListing(
         checkpoints=tuple(
             CheckpointSummary(
-                checkpoint_id=int(c["checkpoint_id"]),
+                checkpoint_id=str(c["checkpoint_id"]),
                 label=c["label"],
                 created=c["created"],
                 objects=tuple(c["objects"]),
@@ -1005,5 +1005,8 @@ def verify_tile_object(
 
 @op()
 def reload_core() -> ReloadReport:
-    """Reload the add-on's class-free modules (core, uv, builder, spec, probe, api) so edits apply without restarting Blender."""
+    """Reload the add-on's class-free modules (core, uv, builder, spec, probe, api) so edits apply without restarting Blender.
+
+    Checkpoints survive the reload; the list of tilesets removed with the grid "-" button resets.
+    """
     return ReloadReport(reloaded=tuple(_addon_api().reload_core()["reloaded"]))
