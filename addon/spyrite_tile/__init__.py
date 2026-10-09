@@ -1,16 +1,3 @@
-bl_info = {
-    "name": "Sprytile Painter",
-    "author": "Jeiel Aranal",
-    # Final version number must be two numerals to support x.x.00
-    "version": (0, 6, 00),
-    "blender": (4, 5, 0),
-    "description": "A utility for creating tile based low spec scenes with paint/map editor tools",
-    "location": "View3D > UI panel > Sprytile",
-    "doc_url": "http://itch.sprytile.xyz",
-    "tracker_url": "https://github.com/ChemiKhazi/Sprytile/issues",
-    "category": "Paint"
-}
-
 import os
 
 import bpy
@@ -18,6 +5,15 @@ import bpy.utils.previews
 from bpy.app.handlers import persistent
 from bpy.props import *
 import rna_keymap_ui
+
+# Enum item numbers of SprytileSceneSettings.paint_align. Defined before the
+# submodule imports because sprytile_utils imports them from the package root.
+PAINT_ALIGN_BY_NUMBER = {
+    1: 'TOP_LEFT', 2: 'TOP', 3: 'TOP_RIGHT',
+    4: 'LEFT', 5: 'CENTER', 6: 'RIGHT',
+    7: 'BOTTOM_LEFT', 8: 'BOTTOM', 9: 'BOTTOM_RIGHT',
+}
+PAINT_ALIGN_NUMBER = {name: number for number, name in PAINT_ALIGN_BY_NUMBER.items()}
 
 from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv
 from .sprytile_tools import tool_build, tool_paint, tool_fill
@@ -232,7 +228,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
             col_val = 3
         else:
             return
-        self["paint_align"] = row_val + col_val
+        self.paint_align = PAINT_ALIGN_BY_NUMBER[row_val + col_val]
 
     def set_align_top(self, value):
         self.set_align_toggle(value, "top")
@@ -244,7 +240,7 @@ class SprytileSceneSettings(bpy.types.PropertyGroup):
         self.set_align_toggle(value, "bottom")
 
     def get_align_toggle(self, row):
-        align = self.get("paint_align", 5)
+        align = PAINT_ALIGN_NUMBER[self.paint_align]
         if row == 'top':
             return align == 1, align == 2, align == 3
         if row == 'middle':
@@ -450,12 +446,12 @@ class SprytileMaterialGridSettings(bpy.types.PropertyGroup):
 
     def set_padding(self, value):
         current_padding = self.get_padding()
-        current_grid = self.get("grid", (32, 32))
+        current_grid = self.grid
         padding_delta = [ (value[0] - current_padding[0]) * 2, (value[1] - current_padding[1]) * 2]
         new_grid = [current_grid[0] - padding_delta[0], current_grid[1] - padding_delta[1]]
         if new_grid[0] < 1 or new_grid[1] < 1:
             return
-        self["grid"] = (new_grid[0], new_grid[1])
+        self.grid = (new_grid[0], new_grid[1])
         self["padding"] = value
 
     def get_padding(self):
@@ -817,39 +813,6 @@ class SprytileAddonPreferences(bpy.types.AddonPreferences):
     #    default='Ctrl',
     #    set=set_sel_move,
     #    get=get_sel_move
-    #)
-
-    # addon updater preferences
-    #auto_check_update: bpy.props.BoolProperty(
-    #    name="Auto-check for Update",
-    #    description="If enabled, auto-check for updates using an interval",
-    #    default=False,
-    #)
-    #updater_intrval_months: bpy.props.IntProperty(
-    #    name='Months',
-    #    description="Number of months between checking for updates",
-    #    default=0,
-    #    min=0
-    #)
-    #updater_intrval_days: bpy.props.IntProperty(
-    #    name='Days',
-    #    description="Number of days between checking for updates",
-    #    default=7,
-    #    min=0,
-    #)
-    #updater_intrval_hours: bpy.props.IntProperty(
-    #    name='Hours',
-    #    description="Number of hours between checking for updates",
-    #    default=0,
-    #    min=0,
-    #    max=23
-    #)
-    #updater_intrval_minutes: bpy.props.IntProperty(
-    #    name='Minutes',
-    #    description="Number of minutes between checking for updates",
-    #    default=0,
-    #    min=0,
-    #    max=59
     #)
 
     def draw(self, context):

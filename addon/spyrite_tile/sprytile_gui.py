@@ -264,7 +264,8 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
             self.exit(context)
             return {'CANCELLED'}
 
-        if not sprytile_utils.get_current_tool(context).startswith("sprytile"):
+        cur_tool = sprytile_utils.get_current_tool(context)
+        if cur_tool is None or not cur_tool.startswith("sprytile"):
             self.exit(context)
             return {'CANCELLED'}
 

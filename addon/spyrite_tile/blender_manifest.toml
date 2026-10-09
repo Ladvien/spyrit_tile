@@ -1,22 +1,32 @@
 schema_version = "1.0.0"
 
-id = "sprytile"
+id = "spyrite_tile"
 version = "0.6.0"
-name = "Sprytile Painter"
-tagline = "Build tile based low spec 3D scenes with paint tools"
-maintainer = "Jeiel Aranal"
+name = "Spyrite Tile"
+tagline = "Build tile-based low-poly pixel-art scenes by hand or by agent"
+maintainer = "Thomas Brittain (ladvien)"
 type = "add-on"
 
-website = "https://github.com/ChemiKhazi/Sprytile"
+website = "https://github.com/ladvien/spyrite_tile"
 
 tags = ["Paint", "Mesh", "UV"]
 
-blender_version_min = "4.5.0"
+blender_version_min = "5.2.0"
 
 license = [
   "SPDX:MIT",
 ]
 
 copyright = [
-  "2016-2017 Jeiel Dionisio Aranal",
+  "2016-2023 Jeiel Aranal and Sprytile contributors",
+  "2026 Thomas Brittain",
+]
+
+[permissions]
+files = "Load tileset images from disk"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "*.pyc",
 ]

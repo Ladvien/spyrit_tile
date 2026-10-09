@@ -14,6 +14,7 @@ from mathutils.bvhtree import BVHTree
 from bpy.path import abspath
 from datetime import datetime
 from os import path
+from . import PAINT_ALIGN_BY_NUMBER, PAINT_ALIGN_NUMBER
 from . import sprytile_modal
 from . import sprytile_preview
 
@@ -467,8 +468,10 @@ def get_current_tool(context):
     '''
     Returns the active tool in edit mode
     '''
-    cur_tool = context.workspace.tools.from_space_view3d_mode('EDIT_MESH', create=False).idname
-    return cur_tool
+    cur_tool = context.workspace.tools.from_space_view3d_mode('EDIT_MESH', create=False)
+    if cur_tool is None:
+        return None
+    return cur_tool.idname
 
 
 def get_paint_settings(sprytile_data):
@@ -502,9 +505,7 @@ def get_paint_settings(sprytile_data):
         for x in range(4, 8):  # All toggles on
             paint_settings += 1 << x
     if sprytile_data.paint_mode == 'PAINT':
-        if not "paint_align" in sprytile_data.keys():
-            sprytile_data["paint_align"] = 5
-        paint_settings += sprytile_data["paint_align"]
+        paint_settings += PAINT_ALIGN_NUMBER[sprytile_data.paint_align]
         paint_settings += (1 if sprytile_data.paint_uv_snap else 0) << 7
         paint_settings += (1 if sprytile_data.paint_edge_snap else 0) << 6
         paint_settings += (1 if sprytile_data.paint_stretch_x else 0) << 5
@@ -531,7 +532,8 @@ def from_paint_settings(sprytile_data, paint_settings):
     if rot_value == 3:
         rot_radian = math.radians(90)
 
-    sprytile_data["paint_align"] = align_value
+    if align_value in PAINT_ALIGN_BY_NUMBER:
+        sprytile_data.paint_align = PAINT_ALIGN_BY_NUMBER[align_value]
     sprytile_data.mesh_rotate = rot_radian
     sprytile_data.uv_flip_x = (paint_settings & 1 << 9) > 0
     sprytile_data.uv_flip_y = (paint_settings & 1 << 8) > 0
@@ -889,7 +891,6 @@ class UTIL_OP_SprytileNewMaterial(bpy.types.Operator):
 
         bpy.ops.sprytile.material_setup('INVOKE_DEFAULT')
         bpy.ops.sprytile.validate_grids('INVOKE_DEFAULT')
-        bpy.data.materials.update()
         return {'FINISHED'}
 
 
@@ -913,8 +914,7 @@ class UTIL_OP_SprytileSetupMaterial(bpy.types.Operator):
         mat = obj.material_slots[obj.active_material_index].material
 
         # Make material equivalent to a shadeless transparent one in Blender 2.7 
-        mat.use_nodes = True
-        mat.blend_method = 'CLIP'
+        mat.surface_render_method = 'DITHERED'
 
         # Get the material texture (if any) so we can keep it
         mat_texture = get_material_texture(mat)
@@ -1020,7 +1020,6 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
 
         bpy.ops.sprytile.texture_setup('INVOKE_DEFAULT')
         bpy.ops.sprytile.validate_grids('INVOKE_DEFAULT')
-        bpy.data.textures.update()
 
         addon_prefs = context.preferences.addons[__package__].preferences
         if addon_prefs:
@@ -1354,28 +1353,6 @@ class UTIL_OP_SprytileReloadImagesAuto(bpy.types.Operator):
     def cancel(self, context):
         wm = context.window_manager
         wm.event_timer_remove(self._timer)
-
-
-class UTIL_OP_SprytileUpdateCheck(bpy.types.Operator):
-    bl_idname = "sprytile.update_check"
-    bl_label = "Check for Update"
-
-    def invoke(self, context, event):
-        print("Check itch.io API")
-        import sys
-        # __package__ is the addon package, "sprytile" when installed as a
-        # legacy addon and "bl_ext.<repo>.sprytile" when installed as an extension
-        addon_module = sys.modules[__package__]
-        print(addon_module.bl_info.get('version', (-1, -1, -1)))
-        import urllib.request
-        import json
-        url = "https://itch.io/api/1/x/wharf/latest?game_id=98966&channel_name=addon"
-        response = urllib.request.urlopen(url)
-        data = response.read()
-        encoding = response.info().get_content_charset('utf-8')
-        json_data = json.loads(data.decode(encoding))
-        print(json_data)
-        return {'FINISHED'}
 
 
 class UTIL_OP_SprytileMakeDoubleSided(bpy.types.Operator):
@@ -2147,7 +2124,6 @@ classes = (
     UTIL_OP_SprytileRotateRight,
     UTIL_OP_SprytileReloadImages,
     UTIL_OP_SprytileReloadImagesAuto,
-    UTIL_OP_SprytileUpdateCheck,
     UTIL_OP_SprytileMakeDoubleSided,
     UTIL_OP_SprytileSetupGrid,
     UTIL_OP_SprytileGridTranslate,
