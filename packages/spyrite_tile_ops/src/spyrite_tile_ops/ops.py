@@ -50,7 +50,7 @@ __all__ = [
     "paint_faces",
     "tile_object_report",
     "scene_report",
-    "select_faces",
+    "select_tile_faces",
     "set_pixel_art_view",
     "build_spec",
     "export_spec",
@@ -195,8 +195,8 @@ class SceneReading:
 
 
 @dataclass(frozen=True)
-class FaceSelector:
-    """Which faces `select_faces` picks; every field is optional and all given fields must hold.
+class TileFaceSelector:
+    """Which faces `select_tile_faces` picks; every field is optional and all given fields must hold.
 
     `tile`/`tiles`: tile name (sidecar) or [column, row]; `tag`: any tile carrying the sidecar tag;
     `plane`, `plane_offset_m`, `layer` ('BASE'/'DECAL'), `facing` (1/-1); `cell_min_xy` + `cell_max_xy`: inclusive
@@ -217,7 +217,7 @@ class FaceSelector:
 
 
 @dataclass(frozen=True)
-class FaceSelection:
+class TileFaceSelection:
     """Sorted face indices matched by a selector, ready for `paint_faces`."""
 
     face_indices: tuple[int, ...]
@@ -490,7 +490,7 @@ def tile_object_report(object_name: str) -> TileObjectReading:
 
 
 @op(reads_only=True)
-def select_faces(object_name: str, where: FaceSelector) -> FaceSelection:
+def select_tile_faces(object_name: str, where: TileFaceSelector) -> TileFaceSelection:
     """Select faces of a tile object by tile, tag, plane, offset, cell rectangle, layer, facing or connectivity."""
     criteria = {
         key: (list(value) if isinstance(value, tuple) else value)
@@ -500,7 +500,7 @@ def select_faces(object_name: str, where: FaceSelector) -> FaceSelection:
     if "tiles" in criteria:
         criteria["tiles"] = [list(t) if isinstance(t, tuple) else t for t in criteria["tiles"]]
     result = _addon_api().select_faces(object_name=object_name, where=criteria)
-    return FaceSelection(face_indices=tuple(int(i) for i in result["face_indices"]), count=int(result["count"]))
+    return TileFaceSelection(face_indices=tuple(int(i) for i in result["face_indices"]), count=int(result["count"]))
 
 
 @op(reads_only=True)
