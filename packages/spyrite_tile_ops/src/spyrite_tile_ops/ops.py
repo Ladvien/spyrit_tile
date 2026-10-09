@@ -49,6 +49,7 @@ __all__ = [
     "remove_tiles",
     "paint_faces",
     "tile_object_report",
+    "set_pixel_art_view",
 ]
 
 
@@ -123,6 +124,16 @@ class TileObjectReading:
     face_count: int
     truncated: bool
     faces: tuple[TileFaceReading, ...]
+
+
+@dataclass(frozen=True)
+class PixelArtViewReport:
+    """The scene's Workbench render settings after set_pixel_art_view."""
+
+    color_type: str
+    light: str
+    render_aa: str
+    view_transform: str
 
 
 # --- plumbing -------------------------------------------------------------
@@ -325,4 +336,15 @@ def tile_object_report(object_name: str) -> TileObjectReading:
             )
             for face in result["faces"]
         ),
+    )
+
+
+def set_pixel_art_view() -> PixelArtViewReport:
+    """Make Workbench renders (render_views) show tile textures as crisp unlit texels instead of grey."""
+    result = _addon_api().set_pixel_art_view()
+    return PixelArtViewReport(
+        color_type=result["color_type"],
+        light=result["light"],
+        render_aa=result["render_aa"],
+        view_transform=result["view_transform"],
     )

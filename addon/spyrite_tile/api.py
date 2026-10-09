@@ -101,6 +101,7 @@ __all__ = [
     "remove_tiles",
     "paint_faces",
     "describe_tile_object",
+    "set_pixel_art_view",
 ]
 
 PLANES = {
@@ -901,4 +902,27 @@ def describe_tile_object(object_name, max_faces=500):
         "face_count": face_count,
         "truncated": face_count > len(faces),
         "faces": faces,
+    }
+
+
+def set_pixel_art_view():
+    """Make the scene's Workbench renders show tile textures as crisp, unlit texels.
+
+    Workbench draws a material's viewport colour (flat grey) unless its colour type is ``TEXTURE``, so
+    ``render_views`` and viewport renders of a tile object show no pixel art by default. This sets the
+    scene's Workbench shading to ``color_type='TEXTURE'`` and ``light='FLAT'`` (no lighting), turns
+    anti-aliasing off (``display.render_aa='OFF'``) and the view transform to ``Standard`` (AgX would shift
+    the colours). Tileset images already use ``Closest`` interpolation. The previous values are not restored;
+    returns ``{color_type, light, render_aa, view_transform}`` as they are now.
+    """
+    scene = bpy.context.scene
+    scene.display.shading.color_type = "TEXTURE"
+    scene.display.shading.light = "FLAT"
+    scene.display.render_aa = "OFF"
+    scene.view_settings.view_transform = "Standard"
+    return {
+        "color_type": scene.display.shading.color_type,
+        "light": scene.display.shading.light,
+        "render_aa": scene.display.render_aa,
+        "view_transform": scene.view_settings.view_transform,
     }

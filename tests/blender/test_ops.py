@@ -230,6 +230,18 @@ def test_fill_remove_paint_and_report_match_api(tileset):
     assert painted[0] == painted[1] == (3, 3)
 
 
+def test_set_pixel_art_view_makes_workbench_show_unlit_texels():
+    report = ops.set_pixel_art_view()
+    scene = bpy.context.scene
+    assert report == ops.PixelArtViewReport(
+        color_type="TEXTURE", light="FLAT", render_aa="OFF", view_transform="Standard"
+    )
+    assert scene.display.shading.color_type == "TEXTURE"
+    assert scene.display.shading.light == "FLAT"
+    assert scene.display.render_aa == "OFF"
+    assert scene.view_settings.view_transform == "Standard"
+
+
 @pytest.mark.parametrize("rotation_deg", [45.0, 91.0, -90.0, 360.0])
 def test_rotation_deg_outside_the_four_quarter_turns_is_refused(rotation_deg):
     bad_placement = ops.TilePlacement(
