@@ -1465,6 +1465,9 @@ class UTIL_OP_SprytileReloadImages(bpy.types.Operator):
                     area.tag_redraw()
         return {'FINISHED'}
 
+    def execute(self, context):
+        return self.invoke(context, None)
+
 
 class UTIL_OP_SprytileReloadImagesAuto(bpy.types.Operator):
     bl_idname = "sprytile.reload_auto"
@@ -2110,6 +2113,9 @@ class UTIL_OP_SprytileResetData(bpy.types.Operator):
         context.scene.sprytile_data.auto_reload = False
         return {'FINISHED'}
 
+    def execute(self, context):
+        return self.invoke(context, None)
+
 
 class UTIL_OP_SprytileFlipXToggle(bpy.types.Operator):
     bl_idname = "sprytile.flip_x_toggle"
@@ -2119,6 +2125,9 @@ class UTIL_OP_SprytileFlipXToggle(bpy.types.Operator):
         context.scene.sprytile_data.uv_flip_x = not context.scene.sprytile_data.uv_flip_x
         return {'FINISHED'}
 
+    def execute(self, context):
+        return self.invoke(context, None)
+
 
 class UTIL_OP_SprytileFlipYToggle(bpy.types.Operator):
     bl_idname = "sprytile.flip_y_toggle"
@@ -2127,6 +2136,9 @@ class UTIL_OP_SprytileFlipYToggle(bpy.types.Operator):
     def invoke(self, context, event):
         context.scene.sprytile_data.uv_flip_y = not context.scene.sprytile_data.uv_flip_y
         return {'FINISHED'}
+
+    def execute(self, context):
+        return self.invoke(context, None)
 
 
 class VIEW3D_MT_SprytileObjectDropDown(bpy.types.Menu):
