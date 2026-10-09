@@ -28,8 +28,9 @@ OUT=$(mktemp -d)
 "$BLENDER" --command extension build --source-dir addon/spyrite_tile --output-dir "$OUT"
 ZIP=$(ls "$OUT"/*.zip)
 "$BLENDER" --command extension validate "$ZIP"
-unzip -l "$ZIP" | grep -q "api.py" || { echo "zip lacks api.py" >&2; exit 1; }
-if unzip -l "$ZIP" | grep -q "__pycache__"; then echo "zip contains __pycache__" >&2; exit 1; fi
+LISTING=$(unzip -l "$ZIP")
+grep -q "api.py" <<<"$LISTING" || { echo "zip lacks api.py" >&2; exit 1; }
+if grep -q "__pycache__" <<<"$LISTING"; then echo "zip contains __pycache__" >&2; exit 1; fi
 
 git tag -a "$TAG" -m "Spyrite Tile $VERSION"
 git push -q origin "$TAG"
