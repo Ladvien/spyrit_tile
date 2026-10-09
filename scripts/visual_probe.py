@@ -188,17 +188,6 @@ def _covered(point, covers):
 
 
 # Viewed from its normal side, a face's (right, up) axes; the probe views look straight at these.
-PLANE_FRAME = {"XY": (0, 1), "XZ": (0, 2), "YZ": (1, 2)}  # world axes of (right, up)
-
-
-def _plane_of(normal):
-    axis = max(range(3), key=lambda k: abs(normal[k]))
-    return {2: "XY", 1: "XZ", 0: "YZ"}[axis]
-
-
-def _cell_of(centre_m, plane, cell_size_m):
-    right_axis, up_axis = PLANE_FRAME[plane]
-    return (int(centre_m[right_axis] // cell_size_m), int(centre_m[up_axis] // cell_size_m))
 
 
 def _turn(quadrants, rotation_deg, flip_x, flip_y):
@@ -219,7 +208,7 @@ def _quadrant_boxes(box):
     return [[(x0, y0, xm, ym), (xm, y0, x1, ym)], [(x0, ym, xm, y1), (xm, ym, x1, y1)]]  # top row first
 
 
-def measure(layout, shot, tileset, tile_size, faces_by_index, placements, cell_size_m, tolerance):
+def measure(layout, shot, tileset, tile_size, faces_by_index, placements, tolerance):
     """Per face: the 4 quadrant colours on screen vs the tile's quadrants turned per its placement."""
     scale = shot.width / layout["area"]["w"]
     region = layout["region"]
@@ -238,8 +227,9 @@ def measure(layout, shot, tileset, tile_size, faces_by_index, placements, cell_s
         info = faces_by_index.get(face["index"])
         if info is None or info["tile_xy"] == [-1, -1]:
             continue
-        plane = _plane_of(info["normal"])
-        cell = _cell_of(info["center_m"], plane, cell_size_m)
+        if info["plane"] is None:
+            continue  # not axis aligned: no plane/cell to look the placement up by
+        plane, cell = info["plane"], tuple(info["cell_xy"])
         placement = placements.get((plane, cell), {}) if placements is not None else {}
         if placements is not None and not placement:
             continue  # a face the caller did not describe cannot be judged
@@ -317,7 +307,7 @@ async def main(args):
     shot = Image.open(io.BytesIO(base64.b64decode(image_block.data))).convert("RGB")
     tileset = Image.open(args.tileset).convert("RGB")
     results = measure(layout, shot, tileset, args.tile_size, faces_by_index,
-                      _load_placements(args.placements), args.cell_size_m, args.tolerance)
+                      _load_placements(args.placements), args.tolerance)
     out = Path(args.out)
     write_evidence(out, shot, results)
 

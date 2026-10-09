@@ -226,8 +226,45 @@ def test_fill_remove_paint_and_report_match_api(tileset):
         assert face.normal == pytest.approx(tuple(api_face["normal"]))
         assert face.tile_xy == tuple(api_face["tile_xy"])
         assert face.material == api_face["material"] == TILESET_NAME
+        assert face.tile_span == tuple(api_face["tile_span"])
+        assert (face.rotation_deg, face.flip_x, face.flip_y) == (
+            api_face["rotation_deg"], api_face["flip_x"], api_face["flip_y"])
+        assert face.layer == api_face["layer"] == "BASE"
+        assert face.plane == api_face["plane"] == "XY"
+        assert face.facing == api_face["facing"] == 1
+        assert face.plane_offset_m == api_face["plane_offset_m"] == 0.0
+        assert face.cell_xy == tuple(api_face["cell_xy"])
+        assert face.on_grid is api_face["on_grid"] is True
+        assert face.tileset == api_face["tileset"] == TILESET_NAME
+        assert face.tile is api_face["tile"] is None
     painted = {face.index: face.tile_xy for face in reading.faces}
     assert painted[0] == painted[1] == (3, 3)
+
+
+def test_scene_report_matches_api(tileset):
+    _create_object_pair()
+    ops.fill_tiles(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (1, 1), (0, 0))
+    reading = ops.scene_report()
+    api_scene = _api().describe_scene()
+
+    mine = next(t for t in reading.tilesets if t.material_name == TILESET_NAME)
+    api_mine = next(t for t in api_scene["tilesets"] if t["material_name"] == TILESET_NAME)
+    assert mine.image_size_px == tuple(api_mine["image_size_px"]) == (64, 64)
+    assert mine.tile_size_px == tuple(api_mine["tile_size_px"]) == TILE_SIZE_PX
+    assert (mine.columns, mine.rows) == (api_mine["columns"], api_mine["rows"]) == (COLUMNS, ROWS)
+    assert mine.grid_id == api_mine["grid_id"] == tileset.grid_id
+    assert mine.image_path == api_mine["image_path"]
+    assert mine.tile_names == {}
+
+    obj = next(o for o in reading.tile_objects if o.object_name == OPS_OBJECT_NAME)
+    api_obj = next(o for o in api_scene["tile_objects"] if o["object_name"] == OPS_OBJECT_NAME)
+    assert obj.face_count == api_obj["face_count"] == 4
+    assert obj.pixels_per_unit == api_obj["pixels_per_unit"] == PIXELS_PER_UNIT_PX
+    assert obj.material_name == TILESET_NAME and obj.overlay_of is None
+    assert reading.removed_tilesets == tuple(api_scene["removed_tilesets"])
+    assert reading.world_pixels == api_scene["settings"]["world_pixels"]
+    assert reading.mesh_decal_offset == pytest.approx(api_scene["settings"]["mesh_decal_offset"])
+    assert reading.auto_merge is api_scene["settings"]["auto_merge"]
 
 
 def test_set_pixel_art_view_makes_workbench_show_unlit_texels():
@@ -266,11 +303,12 @@ def test_rotation_deg_outside_the_four_quarter_turns_is_refused(rotation_deg):
         ops.paint_faces("any", "any", [0], (0, 0), rotation_deg=rotation_deg)
 
 
-def test_tile_object_report_is_the_only_reads_only_op():
+def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     from blended.ops._contract import is_reads_only
 
     assert [name for name in ops.__all__ if is_reads_only(getattr(ops, name))] == [
-        "tile_object_report"
+        "tile_object_report",
+        "scene_report",
     ]
 
 
