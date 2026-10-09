@@ -1,0 +1,15 @@
+# A 6x6 floor with a back wall (XZ) and a left wall (YZ): 36 + 8 + 6 = 50 faces on one object, `room`.
+# Tile names come from tiles_16px.spyrite.yaml, the sidecar next to the image.
+spyrite_spec: 1
+pixels_per_unit: 16
+tilesets:
+  terrain:
+    image: ./tiles_16px.png
+    tile_size_px: [16, 16]
+objects:
+  room:
+    tileset: terrain
+    fills:
+      - {plane: XY, plane_offset_m: 0, cells: [[0, 0], [5, 5]], tile: grass}
+      - {plane: XZ, plane_offset_m: 6, cells: [[0, 0], [3, 1]], tile: wall_top}
+      - {plane: YZ, plane_offset_m: 0, cells: [[0, 0], [2, 1]], tile: wall_top}

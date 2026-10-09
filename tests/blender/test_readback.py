@@ -15,6 +15,8 @@ api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
 sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
+# tests/fixtures/tiles_16px.spyrite.yaml
+FIXTURE_NAMES = {(0, 0): "grass", (1, 0): "stone", (2, 0): "wall_top", (0, 1): "water"}
 PREFIX = "readback_test_"
 TILESET = PREFIX + "tiles"
 OBJECT = PREFIX + "obj"
@@ -88,7 +90,7 @@ def test_every_orientation_reads_back_as_placed(tile_object, plane):
         assert face["tile_span"] == [1, 1]
         assert face["on_grid"] is True
         assert face["tileset"] == TILESET
-        assert face["tile"] is None
+        assert face["tile"] == FIXTURE_NAMES.get(tuple(placement["tile_xy"]))
         assert face["center_m"][axis] == pytest.approx(placement["plane_offset_m"])
 
 
@@ -182,7 +184,7 @@ def test_describe_scene_lists_tileset_and_object(tile_object):
     assert tileset["margin_px"] == [0, 0, 0, 0]
     assert (tileset["columns"], tileset["rows"]) == (4, 4)
     assert Path(tileset["image_path"]).resolve() == FIXTURE_IMAGE.resolve()
-    assert tileset["tile_names"] == {}
+    assert sorted(tileset["tile_names"]) == ["grass", "stone", "wall_top", "water"]
     obj = next(o for o in scene["tile_objects"] if o["object_name"] == OBJECT)
     assert obj["face_count"] == 6
     assert obj["pixels_per_unit"] == PPU

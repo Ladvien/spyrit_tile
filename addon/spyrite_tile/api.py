@@ -66,6 +66,11 @@ Reading back
     its report. A decal reports its lifted ``plane_offset_m``. :func:`describe_scene` lists the tilesets, the
     tile objects and the scene settings.
 
+Specs
+    :func:`build_spec` builds a whole scene from a YAML file (tilesets, objects, fills, tiles; tiles may be
+    given by name from the tileset's sidecar) and :func:`export_spec` writes tile objects back to one; see
+    ``spyrite_spec.validate_spec`` for the schema and ``tests/fixtures/room.spyrite.yaml`` for an example.
+
 Behaviour shared by all editing functions
     * Inputs are validated before anything is touched; errors are
       ``ValueError`` naming the valid range.
@@ -666,7 +671,7 @@ def _normalize_placement(index, placement, tileset):
     return normalized
 
 
-def _apply_placements(obj, tileset, placements):
+def _apply_placements(obj, tileset, placements, clear=False):
     scene = bpy.context.scene
     ppu = _object_pixels_per_unit(obj, scene)
     grid = tileset.grid
@@ -681,6 +686,8 @@ def _apply_placements(obj, tileset, placements):
         data.paint_mode = "MAKE_FACE"
         data.paint_align = "CENTER"
         data.work_layer_mode = "MESH_DECAL"
+        if clear:
+            bmesh.ops.delete(builder.bmesh, geom=list(builder.bmesh.faces), context="FACES")
         for index, placement in enumerate(placements):
             plane = PLANES[placement["plane"]]
             decal = placement["layer"] == "DECAL"
@@ -1250,6 +1257,223 @@ def describe_scene():
             "mesh_decal_offset": data.mesh_decal_offset,
             "auto_merge": data.auto_merge,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Declarative specs
+# ---------------------------------------------------------------------------
+
+
+def _read_spec_file(spec_path):
+    if not isinstance(spec_path, (str, os.PathLike)):
+        raise ValueError(f"spec_path must be a path, got {spec_path!r}")
+    spec_path = os.fspath(spec_path)
+    if not os.path.isabs(spec_path):
+        raise ValueError(f"spec_path must be absolute, got {spec_path!r}")
+    if not os.path.isfile(spec_path):
+        raise ValueError(f"spec_path does not exist or is not a file: {spec_path!r}")
+    with open(spec_path, encoding="utf-8") as handle:
+        return spec_path, handle.read()
+
+
+def _spec_placements(spec_object):
+    """(placements, origins) of an object spec: fills expanded cell by cell, then tiles; origins name each in the spec."""
+    placements = []
+    origins = []
+    for i, fill in enumerate(spec_object["fills"]):
+        low, high = fill["cell_min_xy"], fill["cell_max_xy"]
+        for y in range(low[1], high[1] + 1):
+            for x in range(low[0], high[0] + 1):
+                placements.append(
+                    {"cell_xy": (x, y), "tile": fill["tile"]}
+                    | {k: fill[k] for k in ("plane", "plane_offset_m", "rotation_deg", "flip_x", "flip_y", "layer")}
+                )
+                origins.append(f"fills[{i}]")
+    for i, tile in enumerate(spec_object["tiles"]):
+        placements.append({k: v for k, v in tile.items() if k != "cell_xy"} | {"cell_xy": tuple(tile["cell_xy"])})
+        origins.append(f"tiles[{i}]")
+    return placements, origins
+
+
+def build_spec(spec_path):
+    """Build a scene from a YAML spec file (see ``spyrite_spec.validate_spec`` for the schema).
+
+    ``spec_path`` must be absolute. Tileset ``image`` paths are relative to the spec file's directory (or
+    absolute). Steps: parse and validate the spec, create every tileset (:func:`create_tileset`, idempotent
+    per image), resolve every tile name and check every placement against its tileset, and only then create
+    each object (:func:`create_tile_object`) and apply, in one edit session per object, ``clear`` (delete all
+    its faces first), the ``fills`` (as :func:`fill_tiles`) and the ``tiles`` (as :func:`place_tiles`), in
+    that order. A failure while placing rolls that object back to what it was; tilesets and objects built
+    before the failure stay. Errors are ``ValueError`` (``SpecError`` for spec problems, starting with the
+    dotted path of the bad value, e.g. ``objects.room.tiles[3].tile: ...``).
+
+    Returns ``{spec_path, tilesets: [create_tileset report per tileset], objects: [{object_name, built,
+    remapped, face_count}]}``.
+    """
+    spec_path, text = _read_spec_file(spec_path)
+    spec = spyrite_spec.validate_spec(spyrite_spec.load_spec(text))
+    base_dir = os.path.dirname(spec_path)
+
+    for name, entry in spec["tilesets"].items():
+        image = os.path.normpath(os.path.join(base_dir, os.path.expanduser(entry["image"])))
+        if not os.path.isfile(image):
+            raise spyrite_spec.SpecError(f"tilesets.{name}.image: no such file {image!r} (relative paths start at {base_dir!r})")
+        entry["image_path"] = image
+    for name, entry in spec["objects"].items():
+        try:
+            _as_pixels_per_unit(entry["pixels_per_unit"])
+        except ValueError as error:
+            raise spyrite_spec.SpecError(f"objects.{name}.pixels_per_unit: {error}") from None
+
+    tileset_reports = {}
+    for name, entry in spec["tilesets"].items():
+        tileset_reports[name] = create_tileset(
+            name, entry["image_path"], entry["tile_size_px"], entry["padding_px"], entry["margin_px"]
+        )
+
+    plans = []
+    for name, entry in spec["objects"].items():
+        material_name = tileset_reports[entry["tileset"]]["material_name"]
+        tileset = _find_tileset(material_name)
+        placements, origins = _spec_placements(entry)
+        normalized = []
+        for index, placement in enumerate(placements):
+            try:
+                normalized.append(_normalize_placement(index, placement, tileset))
+            except ValueError as error:
+                message = str(error).replace(f"placements[{index}]", f"objects.{name}.{origins[index]}", 1)
+                raise spyrite_spec.SpecError(message) from None
+        plans.append((name, entry, tileset, normalized))
+
+    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    objects = []
+    for name, entry, tileset, normalized in plans:
+        report = create_tile_object(name, tileset.material.name, entry["pixels_per_unit"])
+        obj = _mesh_object(report["object_name"])
+        result = _apply_placements(obj, tileset, normalized, clear=entry["clear"])
+        objects.append({"object_name": obj.name, **result})
+    return {"spec_path": spec_path, "tilesets": list(tileset_reports.values()), "objects": objects}
+
+
+def _relative_image(spec_dir, image_path):
+    """``./rel/path`` when the image lies under the spec's directory, else the absolute path."""
+    relative = os.path.relpath(image_path, spec_dir)
+    if relative.startswith("..") or os.path.isabs(relative):
+        return image_path
+    return "./" + relative.replace(os.sep, "/")
+
+
+def export_spec(object_names, spec_path):
+    """Write the named tile objects as a YAML spec that :func:`build_spec` rebuilds.
+
+    Each exported face becomes one ``tiles`` entry (``plane``, ``plane_offset_m``, ``cell``, ``tile`` as a
+    sidecar name allowed on the plane when there is one else ``[column, row]``, ``tile_span``,
+    ``rotation_deg``, ``flip_x``, ``flip_y``, ``layer``). A decal's ``plane_offset_m`` is written as its
+    base's offset (the lift is undone); base faces are listed before decals. Only the tilesets the objects
+    use are written, keyed by material name, with ``image`` relative to the spec's directory when under it.
+    ``clear`` is not written. Faces that cannot be rebuilt from placements (not a whole-cell rectangle, facing
+    against the plane's normal, no tile data, or from a tileset other than the object's) are left out and
+    reported. ``spec_path`` must be absolute; missing parent directories are created.
+
+    Returns ``{spec_path, objects: n, tiles: n, unexported_faces: {object_name: [face indices]}}``.
+    """
+    if isinstance(object_names, (str, bytes)) or not hasattr(object_names, "__iter__"):
+        raise ValueError(f"object_names must be a list of object names, got {object_names!r}")
+    object_names = list(object_names)
+    if not object_names:
+        raise ValueError("object_names is empty; name at least one tile object")
+    if not isinstance(spec_path, (str, os.PathLike)):
+        raise ValueError(f"spec_path must be a path, got {spec_path!r}")
+    spec_path = os.fspath(spec_path)
+    if not os.path.isabs(spec_path):
+        raise ValueError(f"spec_path must be absolute, got {spec_path!r}")
+    spec_dir = os.path.dirname(spec_path)
+
+    scene = describe_scene()
+    lift = scene["settings"]["mesh_decal_offset"]
+    tile_objects = {o["object_name"]: o for o in scene["tile_objects"]}
+    tilesets = {t["material_name"]: t for t in scene["tilesets"]}
+    for name in object_names:
+        _as_name("object_names[]", name)
+        if name not in tile_objects:
+            raise ValueError(f"No tile object named {name!r}; tile objects are {sorted(tile_objects)}")
+
+    spec_tilesets = {}
+    spec_objects = {}
+    unexported = {}
+    exported_tiles = 0
+    for name in object_names:
+        info = tile_objects[name]
+        tileset = tilesets.get(info["material_name"])
+        if tileset is None:
+            raise ValueError(f"Object {name!r} has no tileset with an image; nothing to export")
+        described = describe_tile_object(name, max_faces=info["face_count"])
+        entries = []
+        skipped = []
+        for face in described["faces"]:
+            tile_xy = face["tile_xy"]
+            if (
+                not face["on_grid"]
+                or face["facing"] != 1
+                or tile_xy[0] < 0
+                or face["tileset"] != tileset["material_name"]
+            ):
+                skipped.append(face["index"])
+                continue
+            tile = list(tile_xy)
+            for tile_name, entry in tileset["tile_names"].items():
+                if entry["xy"] == tile_xy and (entry["planes"] is None or face["plane"] in entry["planes"]):
+                    tile = tile_name
+                    break
+            offset = face["plane_offset_m"]
+            if face["layer"] == "DECAL":
+                offset = round(offset - lift * PLANES[face["plane"]]["normal"][PLANES[face["plane"]]["axis"]], 6)
+            entries.append(
+                (
+                    face["layer"] == "DECAL",
+                    {
+                        "plane": face["plane"],
+                        "plane_offset_m": offset,
+                        "cell": list(face["cell_xy"]),
+                        "tile": tile,
+                        "tile_span": list(face["tile_span"]),
+                        "rotation_deg": face["rotation_deg"],
+                        "flip_x": face["flip_x"],
+                        "flip_y": face["flip_y"],
+                        "layer": face["layer"],
+                    },
+                )
+            )
+        entries.sort(key=lambda item: item[0])
+        if skipped:
+            unexported[name] = skipped
+        exported_tiles += len(entries)
+        spec_tilesets.setdefault(
+            tileset["material_name"],
+            {
+                "image": _relative_image(spec_dir, tileset["image_path"]),
+                "tile_size_px": list(tileset["tile_size_px"]),
+                "padding_px": list(tileset["padding_px"]),
+                "margin_px": list(tileset["margin_px"]),
+            },
+        )
+        spec_objects[name] = {
+            "tileset": tileset["material_name"],
+            "pixels_per_unit": info["pixels_per_unit"],
+            "tiles": [entry for _, entry in entries],
+        }
+
+    spec = {"spyrite_spec": spyrite_spec.SPEC_VERSION, "tilesets": spec_tilesets, "objects": spec_objects}
+    spyrite_spec.validate_spec(spec)
+    os.makedirs(spec_dir, exist_ok=True)
+    with open(spec_path, "w", encoding="utf-8") as handle:
+        handle.write(spyrite_spec.dump_spec(spec))
+    return {
+        "spec_path": spec_path,
+        "objects": len(spec_objects),
+        "tiles": exported_tiles,
+        "unexported_faces": unexported,
     }
 
 
