@@ -382,7 +382,7 @@ def paint_faces(
 
 @op(reads_only=True)
 def tile_object_report(object_name: str) -> TileObjectReading:
-    """List a tile object's faces: index, world center, normal, tile_xy (column from left, row from top), orientation, plane, cell and layer."""
+    """List a tile object's faces: tile_xy, orientation, plane, cell, layer, offset, on_grid, tileset, tile name."""
     result = _addon_api().describe_tile_object(object_name=object_name)
     return TileObjectReading(
         object_name=result["object_name"],
