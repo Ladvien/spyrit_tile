@@ -59,6 +59,12 @@ Layers
     different ``plane_offset_m`` than their base: pass the shifted offset to
     :func:`remove_tiles` to remove them.
 
+Overlays
+    :func:`create_overlay_object` makes a child tile object of a base object. Placements, fills, patterns and
+    ``remove_tiles`` on it take the BASE's ``plane_offset_m``; the geometry is built ``lift_m`` (default
+    0.002 m) toward the viewer (XY +, XZ -, YZ +). Read-back reports the lifted offsets, so filter an
+    overlay's faces by the lifted value.
+
 Reading back
     :func:`describe_tile_object` reports, per face, everything the placement took: ``tile_xy``, ``tile_span``,
     ``rotation_deg``, ``flip_x``, ``flip_y``, ``layer``, ``plane``, ``facing``, ``plane_offset_m``, ``cell_xy``
@@ -214,6 +220,9 @@ PIXELS_PER_UNIT_MIN = 8
 PIXELS_PER_UNIT_MAX = 2048
 # Custom property on tile objects: the pixel density their geometry was built with
 PIXELS_PER_UNIT_PROP = "spyrite_pixels_per_unit"
+# Custom properties on overlay objects: the base object's name and the lift (metres) toward the viewer
+OVERLAY_OF_PROP = "spyrite_overlay_of"
+OVERLAY_LIFT_PROP = "spyrite_overlay_lift_m"
 # Distance from the plane within which a face counts as lying on it
 PLANE_TOLERANCE_M = 1e-4
 # Slack when turning face extents into cell indices
@@ -605,6 +614,47 @@ def create_tile_object(object_name, material_name, pixels_per_unit):
     }
 
 
+def create_overlay_object(name, base_object_name, material_name, lift_m=0.002):
+    """Create a child tile object that overlays ``base_object_name`` (a decal layer as its own object).
+
+    Like :func:`create_tile_object` (same pixel density as the base) but the object is parented to the base
+    (keeping the base's current world transform) and remembers ``spyrite_overlay_of`` /
+    ``spyrite_overlay_lift_m``. Afterwards ``place_tiles``, ``fill_tiles``, ``fill_pattern`` and
+    ``remove_tiles`` on the overlay take the BASE's ``plane_offset_m`` and build ``lift_m`` metres off the
+    plane (XY +lift, XZ -lift, YZ +lift: toward the viewer) to avoid z-fighting. Read-back
+    (:func:`describe_tile_object`, ``select_faces``) reports the raw lifted offsets, so filter an overlay by
+    ``plane_offset_m`` using the lifted value.
+    Returns the :func:`create_tile_object` report plus ``overlay_of`` and ``lift_m``.
+    """
+    _as_name("name", name)
+    base = _mesh_object(base_object_name)
+    lift = _as_float("lift_m", lift_m)
+    if lift <= 0:
+        raise ValueError(f"lift_m must be > 0, got {lift}")
+    if name == base.name:
+        raise ValueError("an overlay needs a name different from its base object")
+    existing = bpy.data.objects.get(name)
+    if existing is not None and existing.get(OVERLAY_OF_PROP) not in (None, base.name):
+        raise ValueError(f"Object {name!r} is already an overlay of {existing.get(OVERLAY_OF_PROP)!r}")
+    report = create_tile_object(name, material_name, _object_pixels_per_unit(base, bpy.context.scene))
+    obj = bpy.data.objects[report["object_name"]]
+    obj.parent = base
+    obj.matrix_parent_inverse = base.matrix_world.inverted()
+    obj[OVERLAY_OF_PROP] = base.name
+    obj[OVERLAY_LIFT_PROP] = lift
+    report["overlay_of"] = base.name
+    report["lift_m"] = lift
+    return report
+
+
+def _overlay_lift(obj, plane_name):
+    """Metres added to a placement's ``plane_offset_m`` on an overlay object (0.0 for ordinary objects)."""
+    if not obj.get(OVERLAY_OF_PROP):
+        return 0.0
+    plane = PLANES[plane_name]
+    return float(obj.get(OVERLAY_LIFT_PROP, 0.002)) * plane["normal"][plane["axis"]]
+
+
 # ---------------------------------------------------------------------------
 # Edit session plumbing
 # ---------------------------------------------------------------------------
@@ -783,7 +833,7 @@ def _apply_placements(obj, tileset, placements, clear=False, outcomes=None):
             grid_up = up * (grid.grid[1] / ppu)
             uv_right, uv_up = _rotated_frame(right, up, placement["rotation_deg"])
             grid_origin = Vector((0.0, 0.0, 0.0))
-            grid_origin[plane["axis"]] = placement["plane_offset_m"]
+            grid_origin[plane["axis"]] = placement["plane_offset_m"] + _overlay_lift(obj, placement["plane"])
             # Sprytile joins a multi tile selection into one face whose tile coordinate is the end of the
             # selection; a single tile is passed as is
             if span_x == 1 and span_y == 1:
@@ -1096,7 +1146,7 @@ def remove_tiles(object_name, plane, plane_offset_m, cells):
     """
     obj = _mesh_object(object_name)
     plane_name = _as_plane(plane)
-    offset = _as_float("plane_offset_m", plane_offset_m)
+    offset = _as_float("plane_offset_m", plane_offset_m) + _overlay_lift(obj, plane_name)
     if isinstance(cells, (str, bytes, dict)) or not hasattr(cells, "__iter__"):
         raise ValueError(f"cells must be a list of [x, y] cells, got {type(cells).__name__}")
     cell_set = {_as_int_tuple(f"cells[{i}]", cell, 2) for i, cell in enumerate(cells)}
@@ -1781,6 +1831,7 @@ def describe_tile_object(object_name, max_faces=500):
             mesh.free()
     return {
         "object_name": obj.name,
+        "overlay_of": obj.get(OVERLAY_OF_PROP) or None,
         "face_count": face_count,
         "truncated": face_count > len(faces),
         "faces": faces,
@@ -1944,7 +1995,7 @@ def describe_scene():
       margin_px, columns, rows, grid_id, tile_names}`` (``tile_names`` as in :func:`create_tileset`);
     - ``tile_objects``: every mesh object of the view layer bound to a tileset:
       ``{object_name, material_name, grid_id, pixels_per_unit, face_count, location_m, overlay_of}``
-      (``overlay_of`` is None until overlay objects exist);
+      (``overlay_of`` is the base object's name for overlays made by :func:`create_overlay_object`, else None);
     - ``removed_tilesets``: material names hidden with the grid "-" button this session;
     - ``settings``: ``{world_pixels, mesh_decal_offset, auto_merge}`` of ``scene.sprytile_data``.
     """
@@ -1992,7 +2043,7 @@ def describe_scene():
                 "pixels_per_unit": _object_pixels_per_unit(obj, scene),
                 "face_count": len(obj.data.polygons) if obj.mode != "EDIT" else len(bmesh.from_edit_mesh(obj.data).faces),
                 "location_m": [round(c, 6) for c in obj.matrix_world.translation],
-                "overlay_of": None,
+                "overlay_of": obj.get(OVERLAY_OF_PROP) or None,
             }
         )
 

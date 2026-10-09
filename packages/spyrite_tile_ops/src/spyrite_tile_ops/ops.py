@@ -45,6 +45,7 @@ VERIFY_DEFAULT_TOLERANCE = 12.0
 __all__ = [
     "import_tileset",
     "create_tile_object",
+    "create_overlay_object",
     "place_tiles",
     "fill_tiles",
     "fill_pattern",
@@ -110,6 +111,8 @@ class TileObjectReport:
     material_name: str
     grid_id: int
     pixels_per_unit: int
+    overlay_of: str | None = None
+    lift_m: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -532,6 +535,26 @@ def create_tile_object(
         material_name=result["material_name"],
         grid_id=int(result["grid_id"]),
         pixels_per_unit=int(result["pixels_per_unit"]),
+    )
+
+
+def create_overlay_object(
+    name: str, base_object_name: str, tileset_name: str, lift_m: float = 0.002
+) -> TileObjectReport:
+    """Create tile object `name` as a child overlay of `base_object_name`, built lift_m metres off the base's planes."""
+    result = _addon_api().create_overlay_object(
+        name=name,
+        base_object_name=base_object_name,
+        material_name=tileset_name,
+        lift_m=lift_m,
+    )
+    return TileObjectReport(
+        object_name=result["object_name"],
+        material_name=result["material_name"],
+        grid_id=int(result["grid_id"]),
+        pixels_per_unit=int(result["pixels_per_unit"]),
+        overlay_of=result["overlay_of"],
+        lift_m=float(result["lift_m"]),
     )
 
 

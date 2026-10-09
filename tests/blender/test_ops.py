@@ -210,6 +210,39 @@ def test_place_tiles_matches_api(tileset):
     assert len({face[0] for face in via_ops}) == len(PLACEMENTS)
 
 
+def test_create_overlay_object_matches_api(tileset):
+    _create_object_pair()
+    report = ops.create_overlay_object(
+        name=OPS_OBJECT_NAME + "_ov", base_object_name=OPS_OBJECT_NAME, tileset_name=TILESET_NAME, lift_m=0.004
+    )
+    api_result = _api().create_overlay_object(
+        name=API_OBJECT_NAME + "_ov", base_object_name=API_OBJECT_NAME, material_name=TILESET_NAME, lift_m=0.004
+    )
+    assert report == ops.TileObjectReport(
+        object_name=OPS_OBJECT_NAME + "_ov",
+        material_name=api_result["material_name"],
+        grid_id=api_result["grid_id"],
+        pixels_per_unit=api_result["pixels_per_unit"],
+        overlay_of=OPS_OBJECT_NAME,
+        lift_m=0.004,
+    )
+    assert api_result["overlay_of"] == API_OBJECT_NAME and api_result["lift_m"] == 0.004
+    ops.fill_tiles(
+        object_name=report.object_name, tileset_name=TILESET_NAME, cell_min_xy=(0, 0), cell_max_xy=(1, 1), tile_xy=(0, 0)
+    )
+    _api().fill_tiles(
+        object_name=API_OBJECT_NAME + "_ov",
+        material_name=TILESET_NAME,
+        cell_min_xy=(0, 0),
+        cell_max_xy=(1, 1),
+        tile_xy=(0, 0),
+    )
+    via_ops = _geometry(report.object_name)
+    assert via_ops == _geometry(API_OBJECT_NAME + "_ov")
+    assert {face[1][0][0][2] for face in via_ops} == {0.004}
+    assert bpy.data.objects[report.object_name].parent.name == OPS_OBJECT_NAME
+
+
 def test_fill_remove_paint_and_report_match_api(tileset):
     _create_object_pair()
     fill = ops.fill_tiles(
