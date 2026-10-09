@@ -133,10 +133,16 @@ def test_validation_errors():
         api.select_faces(OBJECT, {"facing": 0})
     with pytest.raises(ValueError, match="plane must be one of"):
         api.select_faces(OBJECT, {"plane": "AB"})
-    with pytest.raises(ValueError, match="has no tile names"):
-        api.select_faces(OBJECT, {"tile": "grass"})
     with pytest.raises(ValueError, match="No object named"):
         api.select_faces(PREFIX + "missing", {})
+
+
+def test_name_without_sidecar_errors(tmp_path):
+    image = tmp_path / "plain.png"
+    shutil.copy(FIXTURE_IMAGE, image)
+    _board(image)
+    with pytest.raises(ValueError, match="has no tile names"):
+        api.select_faces(OBJECT, {"tile": "grass"})
 
 
 def test_names_and_tags_use_the_sidecar(tmp_path):

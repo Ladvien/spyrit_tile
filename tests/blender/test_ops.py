@@ -419,8 +419,8 @@ def test_tile_object_and_scene_report_are_the_only_reads_only_ops():
     assert [name for name in ops.__all__ if is_reads_only(getattr(ops, name))] == [
         "tile_object_report",
         "scene_report",
-        "export_spec",
         "select_tile_faces",
+        "export_spec",
     ]
 
 
