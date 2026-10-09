@@ -86,6 +86,13 @@ Sprytile grid. ``padding_px`` is Sprytile's per-tile padding (the grid's tile
 size excludes it) and ``margin_px`` is (top, right, bottom, left). Cell pitch
 in the image is ``tile + 2 * padding + margins`` and ``columns`` / ``rows`` are
 the number of whole pitches in the image, the way the palette lays out tiles.
+
+Tile names
+    A tileset image may have a sidecar ``<image stem>.spyrite.yaml`` (``tiles.png`` -> ``tiles.spyrite.yaml``)
+    naming tiles: ``tiles: {grass: {xy: [0, 0], tags: [floor]}, wall_top: {xy: [2, 0], planes: [XZ, YZ]}}``.
+    Wherever a tile is given (placement ``tile`` / ``tile_xy``, ``fill_tiles``, ``paint_faces``) a name works
+    as well as ``[column, row]``; a name whose ``planes`` exclude the placement plane is refused.
+    ``create_tileset`` reports ``tile_names`` and ``describe_tile_object`` faces carry ``tile``.
 """
 
 import math
@@ -97,6 +104,7 @@ import bmesh
 import bpy
 from mathutils import Vector
 
+from . import spyrite_spec
 from . import sprytile_utils
 from . import sprytile_uv
 from .sprytile_builder import TileBuilder
@@ -154,6 +162,7 @@ _PLACEMENT_KEYS = frozenset(
     {
         "cell_xy",
         "tile_xy",
+        "tile",
         "tile_span",
         "plane",
         "plane_offset_m",
@@ -163,7 +172,7 @@ _PLACEMENT_KEYS = frozenset(
         "layer",
     }
 )
-_PLACEMENT_REQUIRED = frozenset({"cell_xy", "tile_xy"})
+_PLACEMENT_REQUIRED = frozenset({"cell_xy"})
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +275,7 @@ class _Tileset:
         self.mat_data = mat_data
         self.grid = grid
         self.image = image
+        self._names = None
         width, height = image.size
         pitch_x = grid.grid[0] + 2 * grid.padding[0] + grid.margin[1] + grid.margin[3]
         pitch_y = grid.grid[1] + 2 * grid.padding[1] + grid.margin[0] + grid.margin[2]
@@ -289,6 +299,56 @@ class _Tileset:
     def sprytile_origin(self, tile_xy, tile_span):
         """Bottom-left tile of a span in Sprytile's bottom-origin rows."""
         return tile_xy[0], self.rows - (tile_xy[1] + tile_span[1])
+
+    @property
+    def names(self):
+        """Tile names from the sidecar next to the image (``{}`` when there is none), loaded once."""
+        if self._names is None:
+            self._names = {}
+            path = self.sidecar
+            if os.path.isfile(path):
+                with open(path, encoding="utf-8") as handle:
+                    names = spyrite_spec.load_tile_names(handle.read())
+                for name, entry in names.items():
+                    self.check_tile(f"{path}: tiles.{name}.xy", entry["xy"], (1, 1))
+                self._names = names
+        return self._names
+
+    @property
+    def sidecar(self):
+        return spyrite_spec.sidecar_path(bpy.path.abspath(self.image.filepath))
+
+    def tile_names(self):
+        """``{name: {xy, planes, tags}}`` as plain copies, safe to hand to callers."""
+        return {
+            name: {"xy": list(e["xy"]), "planes": None if e["planes"] is None else list(e["planes"]), "tags": list(e["tags"])}
+            for name, e in self.names.items()
+        }
+
+
+def _as_tile(tileset, label, value, plane=None):
+    """Resolve a tile given as ``[column, row]`` or as a name from the tileset's sidecar to a checked tile_xy."""
+    if isinstance(value, str):
+        names = tileset.names
+        if not names:
+            raise ValueError(
+                f"{label}: tileset {tileset.material.name!r} has no tile names (no {tileset.sidecar} "
+                "next to the image); use [column, row]"
+            )
+        entry = names.get(value)
+        if entry is None:
+            raise ValueError(
+                f"{label}: unknown tile name {value!r} in tileset {tileset.material.name!r}; "
+                f"known names: {sorted(names)}"
+            )
+        if plane is not None and entry["planes"] is not None and plane not in entry["planes"]:
+            raise ValueError(
+                f"{label}: tile {value!r} is not allowed on plane {plane} (allowed: {', '.join(entry['planes'])})"
+            )
+        return tuple(entry["xy"])
+    tile_xy = _as_int_tuple(label, value, 2)
+    tileset.check_tile(label, tile_xy, (1, 1))
+    return tile_xy
 
 
 def _find_tileset(material_name):
@@ -390,6 +450,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
                 "rows": rows,
                 "grid_id": existing.grid.id,
                 "reused_material": existing.material.name,
+                "tile_names": existing.tile_names(),
             }
         material = bpy.data.materials.new(material_name)
     material.use_fake_user = True
@@ -423,6 +484,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
         "rows": rows,
         "grid_id": grid.id,
         "reused_material": None,
+        "tile_names": _find_tileset(material.name).tile_names(),
     }
 
 
@@ -583,14 +645,17 @@ def _normalize_placement(index, placement, tileset):
     unknown = set(placement) - _PLACEMENT_KEYS
     if unknown:
         raise ValueError(f"{label} has unknown keys {sorted(unknown)}; valid keys are {sorted(_PLACEMENT_KEYS)}")
-    missing = _PLACEMENT_REQUIRED - set(placement)
-    if missing:
-        raise ValueError(f"{label} is missing required keys {sorted(missing)}")
+    if "cell_xy" not in placement:
+        raise ValueError(f"{label} is missing required keys ['cell_xy']")
+    if ("tile_xy" in placement) == ("tile" in placement):
+        raise ValueError(f"{label} needs exactly one of tile_xy or tile")
+    plane = _as_plane(placement.get("plane", "XY"))
+    tile_key = "tile_xy" if "tile_xy" in placement else "tile"
     normalized = {
         "cell_xy": _as_int_tuple(f"{label}.cell_xy", placement["cell_xy"], 2),
-        "tile_xy": _as_int_tuple(f"{label}.tile_xy", placement["tile_xy"], 2),
+        "tile_xy": _as_tile(tileset, f"{label}.{tile_key}", placement[tile_key], plane),
         "tile_span": _as_int_tuple(f"{label}.tile_span", placement.get("tile_span", (1, 1)), 2, minimum=1),
-        "plane": _as_plane(placement.get("plane", "XY")),
+        "plane": plane,
         "plane_offset_m": _as_float(f"{label}.plane_offset_m", placement.get("plane_offset_m", 0.0)),
         "rotation_deg": _as_rotation(placement.get("rotation_deg", 0.0)),
         "flip_x": _as_bool(f"{label}.flip_x", placement.get("flip_x", False)),
@@ -682,9 +747,11 @@ def _apply_placements(obj, tileset, placements):
 def place_tiles(object_name, material_name, placements):
     """Place tiles; each placement builds a new quad at its cell or remaps the coplanar face already there.
 
-    A placement is a dict with ``cell_xy`` and ``tile_xy`` (required) and optionally ``tile_span`` (1, 1),
-    ``plane`` 'XY', ``plane_offset_m`` 0.0, ``rotation_deg`` 0, ``flip_x`` False, ``flip_y`` False and
-    ``layer`` 'BASE'. Placements apply in order; a failure rolls the whole call back.
+    A placement is a dict with ``cell_xy`` and exactly one of ``tile_xy`` / ``tile`` (required; either may
+    be ``[column, row]`` or a tile name from the tileset's sidecar, see :func:`_as_tile`) and optionally
+    ``tile_span`` (1, 1), ``plane`` 'XY', ``plane_offset_m`` 0.0, ``rotation_deg`` 0, ``flip_x`` False,
+    ``flip_y`` False and ``layer`` 'BASE'. A named tile restricted to other planes is refused.
+    Placements apply in order; a failure rolls the whole call back.
     Returns ``{built, remapped, face_count}``.
     """
     obj = _mesh_object(object_name)
@@ -829,8 +896,7 @@ def paint_faces(object_name, material_name, face_indices, tile_xy, rotation_deg=
     indices = [_as_int(f"face_indices[{i}]", value) for i, value in enumerate(face_indices)]
     if not indices:
         raise ValueError("face_indices is empty")
-    tile = _as_int_tuple("tile_xy", tile_xy, 2)
-    tileset.check_tile("paint_faces", tile, (1, 1))
+    tile = _as_tile(tileset, "paint_faces", tile_xy)
     rotation = _as_rotation(rotation_deg)
     flip_x = _as_bool("flip_x", flip_x)
     flip_y = _as_bool("flip_y", flip_y)
@@ -981,6 +1047,16 @@ def _face_cell(verts_world, plane, cell_w, cell_h):
     return cell, offset, on_grid
 
 
+def _tile_name(tileset, tile_xy):
+    """Name of the tile at ``tile_xy`` (first sidecar entry whose ``xy`` equals it), or None."""
+    if tileset is None:
+        return None
+    for name, entry in tileset.names.items():
+        if entry["xy"] == list(tile_xy):
+            return name
+    return None
+
+
 def describe_tile_object(object_name, max_faces=500):
     """Read back the geometry and orientation of a tile object.
 
@@ -998,9 +1074,8 @@ def describe_tile_object(object_name, max_faces=500):
       at; a decal reports its lifted offset), ``cell_xy`` (cell holding the face's minimum corner, None
       without plane) and ``on_grid`` (true for a rectangle aligned to whole cells on one offset, i.e. what
       ``place_tiles`` builds; false for hand modelled geometry);
-    - ``tileset``: material name of the face's tileset ('' if none); ``tile``: tile name, None until the
-      tileset has names.
-
+    - ``tileset``: material name of the face's tileset ('' if none); ``tile``: the tile's name from the
+      tileset's sidecar (None when unnamed).
     Works in any mode without changing it.
     """
     obj = _mesh_object(object_name)
@@ -1065,12 +1140,13 @@ def describe_tile_object(object_name, max_faces=500):
                     plane_offset_m = round(
                         sum(v[PLANES[plane]["axis"]] for v in verts_world) / len(verts_world), 6
                     )
+            tile_xy = _face_tile_xy(obj, mesh, face, layers, tileset_cache)
             faces.append(
                 {
                     "index": face.index,
                     "center_m": [round(c, 6) for c in center],
                     "normal": [round(c, 6) for c in normal],
-                    "tile_xy": _face_tile_xy(obj, mesh, face, layers, tileset_cache),
+                    "tile_xy": tile_xy,
                     "tile_span": [width, height],
                     "rotation_deg": rotation_deg,
                     "flip_x": flip_x,
@@ -1082,7 +1158,7 @@ def describe_tile_object(object_name, max_faces=500):
                     "cell_xy": cell_xy,
                     "on_grid": on_grid,
                     "tileset": tileset.material.name if tileset is not None else "",
-                    "tile": None,
+                    "tile": _tile_name(tileset, tile_xy),
                     "material": slot_material.name if slot_material is not None else "",
                 }
             )
@@ -1104,7 +1180,7 @@ def describe_scene():
 
     - ``tilesets``: one per ``scene.sprytile_mats`` entry that has a grid and an image texture:
       ``{material_name, image_name, image_path (absolute), image_size_px, tile_size_px, padding_px,
-      margin_px, columns, rows, grid_id, tile_names}`` (``tile_names`` is ``{}`` until tilesets carry names);
+      margin_px, columns, rows, grid_id, tile_names}`` (``tile_names`` as in :func:`create_tileset`);
     - ``tile_objects``: every mesh object of the view layer bound to a tileset:
       ``{object_name, material_name, grid_id, pixels_per_unit, face_count, location_m, overlay_of}``
       (``overlay_of`` is None until overlay objects exist);
@@ -1137,7 +1213,7 @@ def describe_scene():
                 "columns": tileset.columns,
                 "rows": tileset.rows,
                 "grid_id": grid.id,
-                "tile_names": {},
+                "tile_names": tileset.tile_names(),
             }
         )
 

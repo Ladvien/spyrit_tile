@@ -267,7 +267,7 @@ def test_scene_report_matches_api(tileset):
     assert (mine.columns, mine.rows) == (api_mine["columns"], api_mine["rows"]) == (COLUMNS, ROWS)
     assert mine.grid_id == api_mine["grid_id"] == tileset.grid_id
     assert mine.image_path == api_mine["image_path"]
-    assert mine.tile_names == {}
+    assert mine.tile_names == api_mine["tile_names"] == {}
 
     obj = next(o for o in reading.tile_objects if o.object_name == OPS_OBJECT_NAME)
     api_obj = next(o for o in api_scene["tile_objects"] if o["object_name"] == OPS_OBJECT_NAME)
@@ -278,6 +278,48 @@ def test_scene_report_matches_api(tileset):
     assert reading.world_pixels == api_scene["settings"]["world_pixels"]
     assert reading.mesh_decal_offset == pytest.approx(api_scene["settings"]["mesh_decal_offset"])
     assert reading.auto_merge is api_scene["settings"]["auto_merge"]
+
+
+def test_named_tiles_through_ops_match_api(tmp_path):
+    import shutil
+
+    image = tmp_path / "named.png"
+    shutil.copy(FIXTURE_IMAGE, image)
+    (tmp_path / "named.spyrite.yaml").write_text(
+        "spyrite_tileset: 1\ntiles:\n  grass: {xy: [3, 3]}\n  wall: {xy: [1, 0], planes: [XZ]}\n"
+    )
+    _remove_test_data()
+    try:
+        report = ops.import_tileset(name=TILESET_NAME, image_path=image, tile_size_px=TILE_SIZE_PX)
+        assert report.tile_names == _api().create_tileset(
+            TILESET_NAME, str(image), TILE_SIZE_PX
+        )["tile_names"]
+        assert report.tile_names["wall"] == {"xy": [1, 0], "planes": ["XZ"], "tags": []}
+        _create_object_pair()
+        scene_tiles = next(t for t in ops.scene_report().tilesets if t.material_name == TILESET_NAME)
+        assert scene_tiles.tile_names == report.tile_names
+        placements = [
+            ops.TilePlacement(cell_xy=(0, 0), tile="grass"),
+            ops.TilePlacement(cell_xy=(1, 0), tile="wall", plane="XZ"),
+            ops.TilePlacement(cell_xy=(2, 0), tile=(1, 2)),
+        ]
+        via_ops = ops.place_tiles(OPS_OBJECT_NAME, TILESET_NAME, placements)
+        via_api = _api().place_tiles(
+            API_OBJECT_NAME,
+            TILESET_NAME,
+            [{"cell_xy": [0, 0], "tile": "grass"}, {"cell_xy": [1, 0], "tile": "wall", "plane": "XZ"},
+             {"cell_xy": [2, 0], "tile": [1, 2]}],
+        )
+        assert via_ops.face_count == via_api["face_count"] == 3
+        assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
+        ops.fill_tiles(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (0, 0), "grass")
+        ops.paint_faces(OPS_OBJECT_NAME, TILESET_NAME, [0], "grass")
+        reading = ops.tile_object_report(OPS_OBJECT_NAME)
+        by_index = {face.index: face for face in reading.faces}
+        assert by_index[0].tile == "grass" and by_index[0].tile_xy == (3, 3)
+        assert [f.tile for f in reading.faces].count(None) == 1
+    finally:
+        _remove_test_data()
 
 
 def test_set_pixel_art_view_makes_workbench_show_unlit_texels():

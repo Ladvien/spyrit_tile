@@ -473,6 +473,27 @@ def test_image_tools_return_a_json_text_block_and_a_png_image_block(tmp_path, mo
     assert content[1].mimeType == "image/png" and preview.size == (512, 512)  # nearest upscale, 32 px -> 512
 
 
+def test_compose_atlas_with_names_writes_the_sidecar_and_returns_its_path(tmp_path, monkeypatch):
+    import yaml
+
+    monkeypatch.setenv("SPYRITE_OUTPUT_DIR", str(tmp_path))
+    paths = []
+    for index in range(2):
+        path = tmp_path / f"in{index}.png"
+        Image.new("RGBA", (16, 16), (index * 60, 0, 0, 255)).save(path)
+        paths.append(str(path))
+
+    content = _call("compose_atlas", {"paths": paths, "tile_size_px": 16, "columns": 2, "output_name": "named",
+                                      "names": ["grass", "wall"], "planes_by_name": {"wall": ["XZ"]}})
+
+    info = json.loads(content[0].text)
+    assert info["sidecar"] == str((tmp_path / "named.spyrite.yaml").resolve())
+    assert yaml.safe_load((tmp_path / "named.spyrite.yaml").read_text()) == {
+        "spyrite_tileset": 1,
+        "tiles": {"grass": {"xy": [0, 0]}, "wall": {"xy": [1, 0], "planes": ["XZ"]}},
+    }
+
+
 def test_compose_atlas_refuses_relative_paths_and_unsafe_output_names(tmp_path, monkeypatch):
     monkeypatch.setenv("SPYRITE_OUTPUT_DIR", str(tmp_path))
     with pytest.raises(Exception, match="absolute"):

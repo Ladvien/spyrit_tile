@@ -23,6 +23,7 @@ from PIL import Image as PilImage
 
 from spyrite_tile_gen import store
 from spyrite_tile_gen.atlas import compose_atlas as compose_atlas_png
+from spyrite_tile_gen.atlas import sidecar_text
 from spyrite_tile_gen.backends.base import (
     BackendError,
     ImageRequest,
@@ -296,13 +297,26 @@ def normalize_image(
 
 @mcp.tool(structured_output=False)
 def compose_atlas(
-    paths: list[str], tile_size_px: int, columns: int, output_name: str
+    paths: list[str],
+    tile_size_px: int,
+    columns: int,
+    output_name: str,
+    names: list[str] | None = None,
+    planes_by_name: dict[str, list[str]] | None = None,
 ) -> list[Any]:
-    """Join same-size tile PNGs into one tileset, row-major from the top-left; returns each tile_xy."""
+    """Join same-size tile PNGs into one tileset, row-major from the top-left; returns each tile_xy.
+
+    `names` (one per input tile, letters/digits/underscore, unique) also writes `<output_name>.spyrite.yaml`
+    next to the PNG so Blender tools can place tiles by name; `planes_by_name` restricts a name to some of
+    XY/XZ/YZ (default: any). The sidecar path is returned as `sidecar`.
+    """
     for entry in paths:
         if not Path(entry).is_absolute():
             raise ValueError(f"every path must be absolute, got {entry!r}")
+    if names is None and planes_by_name:
+        raise ValueError("planes_by_name needs names")
     png, placed = compose_atlas_png(paths, tile_size_px, columns)
+    sidecar = sidecar_text(names, placed, planes_by_name) if names is not None else None
     saved = store.save_named(
         png,
         output_name,
@@ -312,6 +326,9 @@ def compose_atlas(
             "tiles": [{"path": p, "tile_xy": list(xy)} for p, xy in zip(paths, placed)],
         },
     )
+    if sidecar is not None:
+        sidecar_path = saved.with_suffix(".spyrite.yaml")
+        sidecar_path.write_text(sidecar, encoding="utf-8")
     rows = -(-len(paths) // columns)
     info = {
         "path": str(saved),
@@ -321,6 +338,8 @@ def compose_atlas(
         "rows": rows,
         "tile_xy": [list(xy) for xy in placed],
     }
+    if sidecar is not None:
+        info["sidecar"] = str(sidecar_path)
     return [json.dumps(info), _preview(png)]
 
 
