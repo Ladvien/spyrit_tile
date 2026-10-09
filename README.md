@@ -76,7 +76,7 @@ save/load) instead of hand-computed values.
 
 ### Issue/Feature requests:
 
-Bug reports and feature requests: [GitHub issues](https://github.com/ladvien/spyrite_tile/issues)
+Bug reports and feature requests: [GitHub issues](https://github.com/ladvien/spyrit_tile/issues)
 
 ## Origin and credit
 

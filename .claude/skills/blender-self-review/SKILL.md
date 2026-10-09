@@ -9,7 +9,7 @@ Use this before you say a Blender change "works", after any change to an add-on,
 a tile scene, generated art, or a render path, and whenever a human would otherwise have to
 look. Goal: the user never babysits. You produce evidence a skeptic accepts.
 
-Reference project: `/Users/ladvien/spyrite_tile` (add-on `addon/spyrite_tile`, extension id
+Reference project: `/Users/ladvien/spyrit_tile` (add-on `addon/spyrite_tile`, extension id
 `spyrite_tile`; plugin `packages/spyrite_tile_ops`; generator `packages/spyrite_tile_gen`).
 blended: `/Users/ladvien/blended`. Blender: `/Applications/Blender.app/Contents/MacOS/Blender` (5.2).
 
@@ -37,7 +37,7 @@ blended: `/Users/ladvien/blended`. Blender: `/Applications/Blender.app/Contents/
 
 ## 1. Gate ladder (run bottom-up; stop and fix at the first failure)
 
-| # | Gate | Command (in `~/spyrite_tile`) | Proves | Needs |
+| # | Gate | Command (in `~/spyrit_tile`) | Proves | Needs |
 |---|---|---|---|---|
 | 1 | static | `uvx pyflakes addon/spyrite_tile packages scripts \| grep ': undefined name'` (Blender's `prop : EnumProperty(...)` annotations make pyflakes print hundreds of 'forward annotation' errors; only undefined names matter; baseline: 2 lines, `HIDDEN` at sprytile_utils.py:1024,1073, from a star import) | no undefined names | nothing |
 | 2 | pure | `make test-pure` | generator, normalize, backends (mocked HTTP) | `.venv` |
@@ -59,7 +59,7 @@ Which gates for which change:
 
 - Is it there? `lsof -nP -iTCP:9876 -sTCP:LISTEN` (blended mcp add-on default port 9876).
 - Path: MCP stdio client -> `/Users/ladvien/blended/.venv/bin/blender-mcp`. If the session has
-  the `blended` MCP tools attached (session started in `~/spyrite_tile`, `.omp/mcp.json`), call
+  the `blended` MCP tools attached (session started in `~/spyrit_tile`, `.omp/mcp.json`), call
   them directly; otherwise script it like `scripts/mcp_live_smoke.py` (copy its `_call`/`_returned`).
 - blended rules you will hit: `declare_plan {steps:[...]}` first; every scene-changing call needs
   `plan_step`; `run_python` needs `source` (not `code`) and `reason` (what no op could do).

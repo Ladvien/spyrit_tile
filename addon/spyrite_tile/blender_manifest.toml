@@ -7,7 +7,7 @@ tagline = "Build tile-based low-poly pixel-art scenes by hand or by agent"
 maintainer = "Thomas Brittain (ladvien)"
 type = "add-on"
 
-website = "https://github.com/ladvien/spyrite_tile"
+website = "https://github.com/ladvien/spyrit_tile"
 
 tags = ["Paint", "Mesh", "UV"]
 
