@@ -831,3 +831,15 @@ def test_scene_cursor_does_not_move_the_grid(tile_object):
     (face,) = read_faces(tile_object)
     assert_box(face, (2.0, 3.0), (3.0, 4.0), 0.0)
     assert tuple(bpy.context.scene.cursor.location) == (10.0, 20.0, 30.0)
+
+
+def test_api_re_registers_the_sprytile_properties_after_teardown():
+    """'Remove Sprytile data' unregisters the scene properties; the API puts them back."""
+    bpy.ops.sprytile.props_teardown()
+    assert not hasattr(bpy.types.Scene, "sprytile_data")
+    report = api.create_tileset(TILESET, str(FIXTURE_IMAGE), (TILE_PX, TILE_PX))
+    assert hasattr(bpy.types.Scene, "sprytile_data")
+    assert hasattr(bpy.types.Object, "sprytile_gridid")
+    assert report["columns"] == 4
+    api.create_tile_object(OBJECT, TILESET, PPU)
+    assert api.place_tiles(OBJECT, TILESET, [{"cell_xy": (0, 0), "tile_xy": (0, 0)}])["face_count"] == 1
