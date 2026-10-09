@@ -441,7 +441,11 @@ def fill_pattern(
     cell_max_xy: tuple[int, int] | None = None,
     cells: list[tuple[int, int]] | None = None,
 ) -> PatternFillReport:
-    """Fill cells with a deterministic pattern: kind random (tiles, weights, seed), stamp (rows; rows[0] is the top row) or autotile (mask edges4, tiles keyed "0".."15"; N=1 E=2 S=4 W=8). Give cell_min_xy+cell_max_xy or cells."""
+    """Fill cells with a seeded random, stamp or autotile pattern; give cell_min_xy+cell_max_xy or cells.
+
+    random: tiles, optional weights, seed. stamp: rows (rows[0] is the top row). autotile: mask "edges4" and
+    tiles keyed "0".."15" (N=1, E=2, S=4, W=8 for each neighbour cell in the fill set).
+    """
     result = _addon_api().fill_pattern(
         object_name=object_name,
         material_name=tileset_name,
