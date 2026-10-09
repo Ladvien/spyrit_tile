@@ -14,6 +14,10 @@ PAINT_ALIGN_BY_NUMBER = {
     7: 'BOTTOM_LEFT', 8: 'BOTTOM', 9: 'BOTTOM_RIGHT',
 }
 PAINT_ALIGN_NUMBER = {name: number for number, name in PAINT_ALIGN_BY_NUMBER.items()}
+# Sprytile 0.5.x stored the raw number and could store 0 (no alignment bits:
+# a FILL-built face picked with the tile picker). The enum cannot hold 0, and
+# Blender reads such a stored value back as ''. Keep its old meaning, 0.
+PAINT_ALIGN_NUMBER[''] = 0
 
 from . import sprytile_gui, sprytile_modal, sprytile_panel, sprytile_utils, sprytile_uv
 from .sprytile_tools import tool_build, tool_paint, tool_fill
