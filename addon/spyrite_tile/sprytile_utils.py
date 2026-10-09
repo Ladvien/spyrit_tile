@@ -1472,19 +1472,27 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
         for i in range(3):
             measure_vec[i] = int(round(measure_vec[i] / pixel_unit))
 
-        screen_y = context.region.height - 45
-        screen_x = 20
-        padding = 5
-
         font_id = 0
         font_size = 16
+        padding = 5
         blf.size(font_id, font_size)
+
+        # The WINDOW region runs underneath the headers, so a row drawn near the
+        # top edge is hidden by them (the X row was). Draw in the bottom right
+        # corner instead, clear of the sidebar if it is open.
+        sidebar_width = 0
+        for region in context.area.regions:
+            if region.type == 'UI' and region.width > 1:
+                sidebar_width = region.width
+        row_height = font_size + padding
+        screen_x = context.region.width - sidebar_width - 90
+        screen_y = padding * 2 + row_height * 2
 
         readout_axis = ['X', 'Y', 'Z']
         for i in range(3):
             blf.position(font_id, screen_x, screen_y, 0)
             blf.draw(font_id, "%s : %d" % (readout_axis[i], measure_vec[i]))
-            screen_y -= font_size + padding
+            screen_y -= row_height
 
     def modal(self, context, event):
         # User cancelled transform
@@ -1523,10 +1531,21 @@ class UTIL_OP_SprytileGridTranslate(bpy.types.Operator):
         return {'PASS_THROUGH'}
 
     def get_ref_pos(self, context):
+        """World space position of the element the readout is measured from.
+
+        The pixel unit is a world space length, so the measured positions must be
+        too: an object with scale, rotation or a parent has a local vertex
+        coordinate that differs from where the vertex is in the world."""
         if context.object.mode != 'EDIT':
             return None
         if self.bmesh is None:
             self.bmesh = bmesh.from_edit_mesh(context.object.data)
+        local_pos = self.get_ref_local_pos()
+        if local_pos is None:
+            return None
+        return context.object.matrix_world @ local_pos
+
+    def get_ref_local_pos(self):
         if len(self.bmesh.select_history) <= 0:
             for vert in self.bmesh.verts:
                 if vert.select:

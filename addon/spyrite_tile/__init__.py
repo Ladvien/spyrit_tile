@@ -962,6 +962,9 @@ def generate_tool_keymap(keyconfig, paint_mode):
     km_items.new("sprytile.rotate_right", 'E', 'PRESS')
     km_items.new("sprytile.flip_x_toggle", 'Q', 'PRESS').shift = True
     km_items.new("sprytile.flip_y_toggle", 'E', 'PRESS').shift = True
+    # Blender's own G is transform.translate in the Mesh keymap, so the pixel
+    # grid translate has to be bound by the tool itself to ever be reached
+    km_items.new("sprytile.translate_grid", 'G', 'PRESS')
 
     if paint_mode in {'MAKE_FACE', 'FILL'}:
         km_items.new("sprytile.snap_cursor", 'S', 'PRESS')
