@@ -133,10 +133,10 @@ class VIEW3D_MT_SprytileGridDropDown(bpy.types.Menu):
 
 class VIEW3D_PT_SprytilePanel(bpy.types.Panel):
     bl_idname = "VIEW3D_PT_SprytilePanel"
-    bl_label = "Sprytile Painter"
+    bl_label = "Spyrite Tile"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
-    bl_category = "Sprytile"
+    bl_category = "Spyrite Tile"
 
     # Only show panel when selected object is a mesh and in edit mode
     @classmethod
@@ -150,7 +150,7 @@ class VIEW3D_PT_SprytilePanel(bpy.types.Panel):
         obj = context.object
 
         if hasattr(context.scene, "sprytile_data") is False:
-            layout.label(text="No Sprytile Data")
+            layout.label(text="No Spyrite Tile Data")
             return
 
         sprytile_data = context.scene.sprytile_data

@@ -121,15 +121,15 @@ def ensure_shaders():
 
 class SprytileGuiData(bpy.types.PropertyGroup):
     zoom : FloatProperty(
-        name="Sprytile UI zoom",
+        name="Spyrite Tile UI zoom",
         default=1.0
     )
-    init_zoom_flag: BoolProperty(name="Sprytile Initial Zoom Calc", default=False)
+    init_zoom_flag: BoolProperty(name="Spyrite Tile Initial Zoom Calc", default=False)
     use_mouse : BoolProperty(name="GUI use mouse")
     middle_btn : BoolProperty(name="GUI middle mouse")
     is_dirty : BoolProperty(name="Srpytile GUI redraw flag")
     palette_pos: IntVectorProperty(
-        name="Sprytile tile palette position",
+        name="Spyrite Tile tile palette position",
         size=2,
         default=(0,0)
     )
@@ -137,7 +137,7 @@ class SprytileGuiData(bpy.types.PropertyGroup):
 
 class VIEW3D_OP_SprytileGui(bpy.types.Operator):
     bl_idname = "sprytile.gui_win"
-    bl_label = "Sprytile GUI"
+    bl_label = "Spyrite Tile GUI"
 
     mouse_pt = None
     label_frames = 30
@@ -1336,7 +1336,7 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
 # Dummy widget to detect when sprytile tool is selected
 class SprytileGuiWidgetGroup(bpy.types.GizmoGroup):
     bl_idname = "VIEW3D_GGT_sprytile_gui"
-    bl_label = "Sprytile GUI"
+    bl_label = "Spyrite Tile GUI"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'WINDOW'
     bl_options = {'3D'}
