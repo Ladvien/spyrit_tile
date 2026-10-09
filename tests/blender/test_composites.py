@@ -208,7 +208,7 @@ def test_build_room_rejects_non_integer_floor_offset(tile_object):
         ({"size_cells": (2, 2)}, "size_cells must have exactly 3 integers"),
         ({"origin_cell": (1,)}, "origin_cell must have exactly 2 integers"),
         ({"floor_tile": (4, 0)}, "floor_tile: tile_xy (4, 0) with tile_span (1, 1) is outside tileset"),
-        ({"wall_tile": "grass"}, "has no tile names"),
+        ({"wall_tile": "nope"}, "wall_tile: unknown tile name 'nope' in tileset"),
         ({"ceiling_tile": (0, 9)}, "ceiling_tile: tile_xy"),
     ],
 )
@@ -339,7 +339,7 @@ def test_extrude_edge_needs_whole_cell_offset(tile_object, offset):
         ({"height_cells": 1.5}, "height_cells must be an integer"),
         ({"rotation_deg": 45}, "rotation_deg must be one of"),
         ({"tile": (9, 9)}, "tile: tile_xy"),
-        ({"tile": "brick"}, "has no tile names"),
+        ({"tile": "nope"}, "tile: unknown tile name 'nope' in tileset"),
     ],
 )
 def test_extrude_edge_validates_before_touching(tile_object, kwargs, message):
