@@ -7,7 +7,7 @@
   <br>
 </p>
 
-Spyrite Tile is a Blender add-on for creating tile based low spec 3D scenes, forked from Sprytile by Jeiel Aranal and ported to Blender 4.5+ / 5.x.
+Spyrite Tile is a Blender add-on for creating tile based low spec 3D scenes, forked from Sprytile by Jeiel Aranal and ported to Blender 5.2. Besides the interactive tools, it can be driven by an agent over MCP: an agent generates pixel art, then builds tile scenes through [blended](https://github.com/ladvien/blended).
 
 > **Compatibility note.** Spyrite Tile keeps all of Sprytile's internal identifiers (`sprytile.*` operators, `scene.sprytile_data`, `scene.sprytile_mats`, `object.sprytile_gridid`, keymap and mesh layer names) so that existing data keeps working. Only user-visible names are rebranded. As a consequence:
 >
@@ -26,15 +26,40 @@ Spyrite Tile is a Blender add-on for creating tile based low spec 3D scenes, for
 
 ### Requirements:
 
-Blender 4.5 LTS or newer, including the 5.x series.
+Blender 5.2 LTS or newer (`blender_version_min` in `addon/spyrite_tile/blender_manifest.toml`).
 
 ### Install:
 
-* **As an extension (Blender 4.2+):** `Edit > Preferences > Add-ons > Install from Disk`
-  and pick the zip. Build one with
-  `blender --command extension build --source-dir . --output-dir dist`.
-* **As a legacy addon:** drop this folder into your Blender `scripts/addons`
-  directory and enable the add-on in Preferences.
+* **From a zip:** build one with
+  `blender --command extension build --source-dir addon/spyrite_tile --output-dir dist`,
+  then `Edit > Preferences > Get Extensions > Install from Disk` and pick it.
+* **From this checkout (development):** `make install-addon` symlinks
+  `addon/spyrite_tile` into Blender 5.2's `extensions/user_default` and enables it
+  (it backs up `userpref.blend` first). Restart Blender after add-on edits.
+
+### Agent-driven building
+
+Three pieces, all in this repository:
+
+| Piece | Where it runs | What it does |
+|---|---|---|
+| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `describe_tile_object` |
+| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `remove_tiles`, `paint_faces`, `tile_object_report` |
+| `packages/spyrite_tile_gen` | on the host | MCP server `spyrite-tile-gen`: `generate_tile`, `generate_sprite`, `generate_tileset` (Retro Diffusion, paid, needs `RD_API_KEY`; or the local SDXL service), `normalize_image`, `compose_atlas`, `estimate_cost`, `list_backends` |
+| `services/pixel_server` | GPU host | FastAPI SDXL + pixel-art LoRA service behind the `local` backend (systemd user unit `spyrite-pixel.service`, port 8190) |
+
+Setup: `uv sync --all-packages` (creates `.venv` with `spyrite-tile-gen`), `make install-addon`,
+`make install-blended-plugin` (re-run after any `uv sync` in blended), and blended's own
+`make install-mcp-addon`. `.mcp.json` / `.omp/mcp.json` register both MCP servers.
+
+Conventions: `tile_xy` is (column from the left, row from the top) of the tileset image;
+cells are whole tiles, one cell = `tile_size_px / pixels_per_unit_px` metres; planes are `XY`
+(floor), `XZ` (front wall, normal -Y) and `YZ` (side wall, normal +X), offset along the normal
+by `plane_offset_m`. There is no automatic fallback between generation backends.
+
+Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
+(add-on API and blended ops inside Blender 5.2, isolated from your user config), and
+`tests/gui/run_gui_smoke.sh` (drives the interactive tools in a GUI Blender with simulated input).
 
 ### Getting Started:
 
