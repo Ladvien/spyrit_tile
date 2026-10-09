@@ -1180,6 +1180,153 @@ def describe_tile_object(object_name, max_faces=500):
     }
 
 
+_SELECT_KEYS = (
+    "tile", "tiles", "tag", "plane", "plane_offset_m", "cell_min_xy", "cell_max_xy", "layer", "facing",
+    "connected_to_cell",
+)
+
+
+def select_faces(object_name, where):
+    """Select faces of a tile object by what they show and where they are (read-only).
+
+    ``where`` is a dict whose keys are all optional and ANDed; an empty dict selects every face:
+
+    - ``tile`` (a name from the tileset's sidecar or ``[column, row]``) / ``tiles`` (a list of either): faces
+      whose tile (the span origin for multi tile faces) is one of them; names resolve in the object's tileset;
+    - ``tag``: faces whose tile is any sidecar entry carrying that tag;
+    - ``plane`` ('XY', 'XZ', 'YZ'), ``plane_offset_m`` (within 1e-4 m), ``layer`` ('BASE'/'DECAL'),
+      ``facing`` (1 or -1);
+    - ``cell_min_xy`` + ``cell_max_xy`` (both or neither): faces whose ``cell_xy`` is inside the inclusive
+      rectangle (cells are on the plane the face lies on, so combine with ``plane``);
+    - ``connected_to_cell`` ``[x, y]``: the 4-connected region of on-grid faces on ``plane`` (required) at one
+      offset that show the same tile as the face at that cell, flooding from it (a multi tile face counts as
+      its minimum cell). Without ``plane_offset_m`` the offset of the face found at the cell is used (an error
+      when faces at several offsets sit there); ``layer`` and ``facing`` narrow the start face and are kept
+      by the flood. The region is then ANDed with the other keys.
+
+    Works from :func:`describe_tile_object` output in any mode. The result feeds ``paint_faces`` (a non
+    contiguous fill). Returns ``{"face_indices": sorted list, "count"}``.
+    """
+    if not isinstance(where, dict):
+        raise ValueError(f"where must be a dict with keys from {list(_SELECT_KEYS)}, got {type(where).__name__}")
+    unknown = sorted(set(where) - set(_SELECT_KEYS))
+    if unknown:
+        raise ValueError(f"where: unknown keys {unknown}; valid keys: {list(_SELECT_KEYS)}")
+    obj = _mesh_object(object_name)
+    object_tileset = _cached_tileset(obj, obj.sprytile_gridid, {})
+
+    def tile_of(label, value):
+        if object_tileset is None:
+            raise ValueError(f"{label}: object {obj.name!r} has no tileset; create it with create_tile_object")
+        return list(_as_tile(object_tileset, label, value))
+
+    wanted_tiles = None
+    if where.get("tile") is not None:
+        wanted_tiles = [tile_of("where.tile", where["tile"])]
+    if where.get("tiles") is not None:
+        if not isinstance(where["tiles"], (list, tuple)):
+            raise ValueError("where.tiles must be a list of tile names or [column, row]")
+        tiles = [tile_of(f"where.tiles[{i}]", v) for i, v in enumerate(where["tiles"])]
+        wanted_tiles = tiles if wanted_tiles is None else [t for t in wanted_tiles if t in tiles]
+    tag = where.get("tag")
+    if tag is not None:
+        _as_name("where.tag", tag)
+    plane = _as_plane(where["plane"]) if where.get("plane") is not None else None
+    offset = _as_float("where.plane_offset_m", where["plane_offset_m"]) if where.get("plane_offset_m") is not None else None
+    layer = _as_layer(where["layer"]) if where.get("layer") is not None else None
+    facing = None
+    if where.get("facing") is not None:
+        facing = _as_int("where.facing", where["facing"])
+        if facing not in (1, -1):
+            raise ValueError(f"where.facing must be 1 or -1, got {facing}")
+    rect = None
+    if (where.get("cell_min_xy") is None) != (where.get("cell_max_xy") is None):
+        raise ValueError("where: cell_min_xy and cell_max_xy must be given together")
+    if where.get("cell_min_xy") is not None:
+        low = _as_int_tuple("where.cell_min_xy", where["cell_min_xy"], 2)
+        high = _as_int_tuple("where.cell_max_xy", where["cell_max_xy"], 2)
+        if high[0] < low[0] or high[1] < low[1]:
+            raise ValueError(f"where: cell_max_xy {list(high)} must be >= cell_min_xy {list(low)}")
+        rect = (low, high)
+    start = None
+    if where.get("connected_to_cell") is not None:
+        if plane is None:
+            raise ValueError("where.connected_to_cell needs where.plane (the plane the cell lies on)")
+        start = _as_int_tuple("where.connected_to_cell", where["connected_to_cell"], 2)
+
+    face_count = describe_tile_object(object_name, max_faces=0)["face_count"]
+    faces = describe_tile_object(object_name, max_faces=face_count)["faces"]
+
+    def near(a, b):
+        return a is not None and abs(a - b) <= PLANE_TOLERANCE_M
+
+    region = None
+    if start is not None:
+        at_start = [
+            f for f in faces
+            if f["plane"] == plane and f["on_grid"] and tuple(f["cell_xy"]) == start
+            and (offset is None or near(f["plane_offset_m"], offset))
+            and (layer is None or f["layer"] == layer)
+            and (facing is None or f["facing"] == facing)
+        ]
+        if not at_start:
+            raise ValueError(f"where.connected_to_cell: no on-grid face at cell {list(start)} on plane {plane}")
+        offsets = sorted({f["plane_offset_m"] for f in at_start})
+        merged = [o for i, o in enumerate(offsets) if i == 0 or not near(o, offsets[i - 1])]
+        if len(merged) > 1:
+            raise ValueError(
+                f"where.connected_to_cell: faces at cell {list(start)} lie at several plane offsets {offsets}; "
+                "pass plane_offset_m (and layer) to choose one"
+            )
+        first = at_start[0]
+        by_cell = {}
+        for f in faces:
+            if (f["plane"] == plane and f["on_grid"] and f["tile_xy"] == first["tile_xy"]
+                    and f["tileset"] == first["tileset"] and f["layer"] == first["layer"]
+                    and f["facing"] == first["facing"] and near(f["plane_offset_m"], first["plane_offset_m"])):
+                by_cell.setdefault(tuple(f["cell_xy"]), []).append(f["index"])
+        seen = {start}
+        queue = [start]
+        while queue:
+            x, y = queue.pop()
+            for neighbour in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if neighbour in by_cell and neighbour not in seen:
+                    seen.add(neighbour)
+                    queue.append(neighbour)
+        region = {i for cell in seen for i in by_cell[cell]}
+
+    tags_cache = {}
+
+    def has_tag(face):
+        material = face["tileset"]
+        if material not in tags_cache:
+            tags_cache[material] = _find_tileset(material).names if material else {}
+        return any(tag in e["tags"] and e["xy"] == face["tile_xy"] for e in tags_cache[material].values())
+
+    selected = []
+    for f in faces:
+        if region is not None and f["index"] not in region:
+            continue
+        if wanted_tiles is not None and f["tile_xy"] not in wanted_tiles:
+            continue
+        if tag is not None and not has_tag(f):
+            continue
+        if plane is not None and f["plane"] != plane:
+            continue
+        if offset is not None and not near(f["plane_offset_m"], offset):
+            continue
+        if layer is not None and f["layer"] != layer:
+            continue
+        if facing is not None and f["facing"] != facing:
+            continue
+        if rect is not None:
+            cell = f["cell_xy"]
+            if cell is None or not (rect[0][0] <= cell[0] <= rect[1][0] and rect[0][1] <= cell[1] <= rect[1][1]):
+                continue
+        selected.append(f["index"])
+    return {"face_indices": sorted(selected), "count": len(selected)}
+
+
 def describe_scene():
     """Read back every tileset and tile object of the scene.
 
