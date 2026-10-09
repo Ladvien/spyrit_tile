@@ -541,7 +541,7 @@ def create_tile_object(
 def create_overlay_object(
     name: str, base_object_name: str, tileset_name: str, lift_m: float = 0.002
 ) -> TileObjectReport:
-    """Create tile object `name` as a child overlay of `base_object_name`; placements on it take the base's offsets and build lift_m (metres) toward the viewer."""
+    """Create tile object `name` as a child overlay of `base_object_name`, built lift_m metres off the base's planes."""
     result = _addon_api().create_overlay_object(
         name=name,
         base_object_name=base_object_name,
