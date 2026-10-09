@@ -895,6 +895,9 @@ class UTIL_OP_SprytileNewMaterial(bpy.types.Operator):
         return context.object is not None
 
     def invoke(self, context, event):
+        return self.execute(context)
+
+    def execute(self, context):
         obj = context.object
         if obj.type != 'MESH':
             return {'FINISHED'}
@@ -902,10 +905,8 @@ class UTIL_OP_SprytileNewMaterial(bpy.types.Operator):
         mat = bpy.data.materials.new(name="Material")
 
         set_idx = len(obj.material_slots)
-        bpy.ops.object.material_slot_add()
-
+        obj.data.materials.append(mat)
         obj.active_material_index = set_idx
-        obj.material_slots[set_idx].material = mat
 
         bpy.ops.sprytile.material_setup('INVOKE_DEFAULT')
         bpy.ops.sprytile.validate_grids('INVOKE_DEFAULT')
@@ -1024,6 +1025,10 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
         options={'HIDDEN'},
     )
 
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None
+
     def execute(self, context):
         if context.object.type != 'MESH':
             return {'FINISHED'}
@@ -1072,6 +1077,10 @@ class UTIL_OP_SprytileNewTileset(bpy.types.Operator, ImportHelper):
         default="*.bmp;*.psd;*.hdr;*.rgba;*.jpg;*.png;*.tiff;*.tga;*.jpeg;*.jp2;*.rgb;*.dds;*.exr;*.psb;*.j2c;*.dpx;*.tif;*.tx;*.cin;*.pdd;*.sgi",
         options={'HIDDEN'},
     )
+
+    @classmethod
+    def poll(cls, context):
+        return context.object is not None
 
     def execute(self, context):
         if context.object.type != 'MESH':
