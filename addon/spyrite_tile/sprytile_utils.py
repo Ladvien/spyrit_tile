@@ -1133,11 +1133,41 @@ class UTIL_OP_SprytileLoadTileset(bpy.types.Operator, ImportHelper):
     def execute(self, context):
         if context.object.type != 'MESH':
             return {'FINISHED'}
+        if UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath):
+            return {'FINISHED'}
         # Check object material count, if 0 create a new material before loading
         if len(context.object.material_slots.items()) < 1:
             bpy.ops.sprytile.add_new_material('INVOKE_DEFAULT')
         UTIL_OP_SprytileLoadTileset.load_tileset_file(context, self.filepath)
         return {'FINISHED'}
+
+    @staticmethod
+    def reuse_tileset_material(context, filepath):
+        """Use the existing tileset material built from this image file, if there is one.
+
+        Appends it to the active object's material slots (or selects its slot) and keeps the tileset's grid
+        settings. Returns False when no tileset uses the file, so the caller creates a new material.
+        """
+        wanted = path.realpath(abspath(filepath))
+        existing = None
+        for mat_data in context.scene.sprytile_mats:
+            material = bpy.data.materials.get(mat_data.mat_id)
+            if material is None or len(mat_data.grids) == 0 or material.session_uid in _removed_tilesets:
+                continue
+            image = get_material_texture(material)
+            if image is not None and path.realpath(abspath(image.filepath)) == wanted:
+                existing = material
+                break
+        if existing is None:
+            return False
+        obj = context.object
+        slot_index = next((i for i, slot in enumerate(obj.material_slots) if slot.material == existing), None)
+        if slot_index is None:
+            obj.data.materials.append(existing)
+            slot_index = len(obj.material_slots) - 1
+        obj.active_material_index = slot_index
+        obj.sprytile_gridid = get_mat_data(context, existing.name).grids[0].id
+        return True
 
     @staticmethod
     def load_tileset_file(context, filepath):
@@ -1185,6 +1215,8 @@ class UTIL_OP_SprytileNewTileset(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         if context.object.type != 'MESH':
+            return {'FINISHED'}
+        if UTIL_OP_SprytileLoadTileset.reuse_tileset_material(context, self.filepath):
             return {'FINISHED'}
         bpy.ops.sprytile.add_new_material('INVOKE_DEFAULT')
         UTIL_OP_SprytileLoadTileset.load_tileset_file(context, self.filepath)

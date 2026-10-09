@@ -17,6 +17,7 @@ api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
 sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
+OTHER_IMAGE = FIXTURE_IMAGE.with_name("tiles_oriented_16px.png")
 PREFIX = "i133_"
 TILESET_A = PREFIX + "a"
 TILESET_B = PREFIX + "b"
@@ -42,7 +43,9 @@ def clean_scene():
 
 
 def _make(tileset_name, object_name):
-    api.create_tileset(tileset_name, str(FIXTURE_IMAGE), (16, 16))
+    # distinct images: the same image + layout would reuse one tileset
+    image = OTHER_IMAGE if tileset_name == TILESET_B else FIXTURE_IMAGE
+    api.create_tileset(tileset_name, str(image), (16, 16))
     api.create_tile_object(object_name, tileset_name, 16)
     return bpy.data.objects[object_name]
 

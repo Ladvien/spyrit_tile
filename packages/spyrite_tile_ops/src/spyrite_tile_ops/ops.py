@@ -83,6 +83,7 @@ class TilesetReport:
     columns: int
     rows: int
     grid_id: int
+    reused_material: str | None = None
 
 
 @dataclass(frozen=True)
@@ -262,7 +263,11 @@ def import_tileset(
     padding_px: tuple[int, int] = (0, 0),
     margin_px: tuple[int, int, int, int] = (0, 0, 0, 0),
 ) -> TilesetReport:
-    """Register an absolute-path image as tileset `name`; tiles are tile_size_px, counted from the top-left."""
+    """Register an absolute-path image as tileset `name`; tiles are tile_size_px, counted from the top-left.
+
+    Idempotent: if the same image with the same layout is already a tileset under another name, nothing is
+    created and the report names it in `reused_material`; use the report's `material_name` afterwards.
+    """
     result = _addon_api().create_tileset(
         material_name=name,
         image_path=str(image_path),
@@ -278,6 +283,7 @@ def import_tileset(
         columns=int(result["columns"]),
         rows=int(result["rows"]),
         grid_id=int(result["grid_id"]),
+        reused_material=result["reused_material"],
     )
 
 

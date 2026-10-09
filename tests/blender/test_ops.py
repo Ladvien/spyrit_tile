@@ -110,6 +110,19 @@ def test_import_tileset_reports_the_grid(tileset):
     assert (tileset.columns, tileset.rows) == (COLUMNS, ROWS)
 
 
+def test_import_tileset_reuse_matches_api(tileset):
+    report = ops.import_tileset(
+        name=TILESET_NAME + "_again", image_path=FIXTURE_IMAGE, tile_size_px=TILE_SIZE_PX
+    )
+    api_result = _api().create_tileset(
+        material_name=TILESET_NAME + "_api", image_path=str(FIXTURE_IMAGE), tile_size_px=list(TILE_SIZE_PX)
+    )
+    assert tileset.reused_material is None
+    assert report.reused_material == TILESET_NAME == api_result["reused_material"]
+    assert report.material_name == api_result["material_name"] == TILESET_NAME
+    assert bpy.data.materials.get(TILESET_NAME + "_again") is None
+
+
 def test_create_tile_object_matches_api(tileset):
     ops_report, api_result = _create_object_pair()
     assert ops_report == ops.TileObjectReport(

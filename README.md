@@ -55,7 +55,9 @@ Setup: `uv sync --all-packages` (creates `.venv` with `spyrite-tile-gen`), `make
 Conventions: `tile_xy` is (column from the left, row from the top) of the tileset image;
 cells are whole tiles, one cell = `tile_size_px / pixels_per_unit_px` metres; planes are `XY`
 (floor), `XZ` (front wall, normal -Y) and `YZ` (side wall, normal +X), offset along the normal
-by `plane_offset_m`. There is no automatic fallback between generation backends.
+by `plane_offset_m`. Tilesets are idempotent: `import_tileset` with an image and layout that already
+backs a tileset under another name creates nothing and returns that tileset (`reused_material`), so
+always use the report's `material_name`. There is no automatic fallback between generation backends.
 
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and
