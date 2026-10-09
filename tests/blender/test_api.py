@@ -584,6 +584,7 @@ def test_describe_truncates(tile_object):
 def test_describe_empty_object_and_untiled_face(tile_object):
     assert api.describe_tile_object(OBJECT) == {
         "object_name": OBJECT,
+        "overlay_of": None,
         "face_count": 0,
         "truncated": False,
         "faces": [],

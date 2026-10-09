@@ -96,6 +96,10 @@ cells; `move_faces(face_indices, delta_px=(dx, dy, dz))` shifts faces by whole p
 tile data stored on them. The planes have fixed normals, so only back/left walls and N/W edges exist: build rooms
 whose open sides face -Y and +X.
 
+Overlays: `create_overlay_object(name, base_object_name, tileset_name, lift_m=0.002)` makes a child tile object of
+a base object. Place on it with the BASE's `plane_offset_m`; its faces are built `lift_m` toward the viewer
+(XY +, XZ -, YZ +), so read-back reports the lifted offsets and `tile_object_report`/`scene_report` give `overlay_of`.
+
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and
 `tests/gui/run_gui_smoke.sh` (drives the interactive tools in a GUI Blender with simulated input).
