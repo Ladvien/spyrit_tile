@@ -208,3 +208,38 @@ def test_sidecar_that_does_not_fit_the_layout_still_reads_back():
     tileset = next(t for t in api.describe_scene()["tilesets"] if t["material_name"] == TILESET)
     assert (tileset["columns"], tileset["rows"]) == (2, 2)
     assert tileset["tile_names"]["wall_top"]["xy"] == [2, 0]
+
+def test_wall_decal_is_lifted_toward_minus_y(tile_object):
+    api.place_tiles(
+        OBJECT,
+        TILESET,
+        [
+            {"cell_xy": [0, 0], "tile_xy": [0, 0], "plane": "XZ", "plane_offset_m": 6.0},
+            {"cell_xy": [0, 0], "tile_xy": [1, 0], "plane": "XZ", "plane_offset_m": 6.0, "layer": "DECAL"},
+        ],
+    )
+    faces = api.describe_tile_object(OBJECT)["faces"]
+    base = next(f for f in faces if f["layer"] == "BASE")
+    decal = next(f for f in faces if f["layer"] == "DECAL")
+    assert base["plane_offset_m"] == pytest.approx(6.0)
+    assert decal["plane_offset_m"] == pytest.approx(5.998)
+    assert decal["plane"] == "XZ" and decal["cell_xy"] == [0, 0] and decal["on_grid"] is True
+
+
+def test_negative_cells_read_back(tile_object):
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [-2, -3], "tile_xy": [1, 1]}])
+    face = api.describe_tile_object(OBJECT)["faces"][0]
+    assert face["cell_xy"] == [-2, -3]
+    assert face["on_grid"] is True
+
+
+def test_world_space_read_back_under_an_object_transform(tile_object):
+    tile_object.location = (5, -2, 1)
+    bpy.context.view_layer.update()
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [2, 3], "tile_xy": [1, 1]}])
+    face = api.describe_tile_object(OBJECT)["faces"][0]
+    # placement and read-back are both in world space: the object's location does not shift either
+    assert face["cell_xy"] == [2, 3]
+    assert face["plane_offset_m"] == pytest.approx(0.0)
+    assert face["center_m"] == pytest.approx([2.5, 3.5, 0.0])
+    assert face["on_grid"] is True

@@ -104,14 +104,19 @@ def test_rect_plane_offset_layer_and_facing_filters():
     assert api.select_faces(OBJECT, {"plane": "XZ"})["count"] == 2
     assert api.select_faces(OBJECT, {"plane": "YZ"})["count"] == 0
     rect = api.select_faces(OBJECT, {"plane": "XY", "cell_min_xy": [1, 1], "cell_max_xy": [2, 3]})
-    assert rect["count"] == 6
+    faces = api.describe_tile_object(OBJECT, max_faces=1000)["faces"]
+    by_cell = {tuple(f["cell_xy"]): f["index"] for f in faces if f["plane"] == "XY"}
+    assert rect["face_indices"] == sorted(by_cell[(x, y)] for x in (1, 2) for y in (1, 2, 3))
+    assert api.select_faces(OBJECT, {"plane": "XZ"})["face_indices"] == sorted(
+        f["index"] for f in faces if f["plane"] == "XZ"
+    )
     assert api.select_faces(OBJECT, {"plane": "XZ", "plane_offset_m": 6.0})["count"] == 2
     assert api.select_faces(OBJECT, {"plane": "XZ", "plane_offset_m": 5.0})["count"] == 0
     assert api.select_faces(OBJECT, {"layer": "DECAL"})["count"] == 0
     assert api.select_faces(OBJECT, {"layer": "BASE"})["count"] == 38
-    facing = api.describe_tile_object(OBJECT, max_faces=1)["faces"][0]["facing"]
-    assert api.select_faces(OBJECT, {"plane": "XY", "facing": facing})["count"] == 36
-    assert api.select_faces(OBJECT, {"plane": "XY", "facing": -facing})["count"] == 0
+    # XY faces point along +Z (PLANES['XY']['normal']), so their facing is the literal 1
+    assert api.select_faces(OBJECT, {"plane": "XY", "facing": 1})["count"] == 36
+    assert api.select_faces(OBJECT, {"plane": "XY", "facing": -1})["count"] == 0
 
 
 def test_decal_layer_selected():
@@ -169,3 +174,18 @@ def test_paint_faces_repaints_exactly_the_selection():
     for index, tile in after.items():
         assert tile == ([3, 3] if index in selection else before[index])
     assert api.select_faces(OBJECT, {"tile": [3, 3]})["face_indices"] == selection
+
+
+def test_tile_selection_is_scoped_to_the_objects_tileset():
+    _board()
+    other = PREFIX + "other"
+    api.create_tileset(other, str(FIXTURE_IMAGE.with_name("tiles_oriented_16px.png")), (16, 16))
+    api.place_tiles(OBJECT, other, [{"cell_xy": [9, 9], "tile_xy": list(A)}])
+    foreign = next(
+        f["index"] for f in api.describe_tile_object(OBJECT, max_faces=1000)["faces"] if f["tileset"] == other
+    )
+    for where in ({"tile": list(A)}, {"tiles": [list(A), list(B)]}):
+        picked = api.select_faces(OBJECT, where)
+        assert foreign not in picked["face_indices"]
+    assert api.select_faces(OBJECT, {"tile": list(A)})["count"] == 31
+    assert api.select_faces(OBJECT, {})["count"] == 37

@@ -208,3 +208,12 @@ def test_patterns_normalise():
     assert second["cells"] == [[1, 1], [0, 0]] and second["plane"] == "XY" and second["layer"] == "BASE"
     assert third["pattern"]["mask"] == "edges4" and sorted(third["pattern"]["tiles"], key=int) == [str(k) for k in range(16)]
     assert spec_module.validate_spec(VALID)["objects"]["room"]["patterns"] == []
+
+
+@pytest.mark.parametrize("entry", ["random", 5, None, ["kind"]])
+def test_non_mapping_pattern_entry_is_a_spec_error_with_the_path(entry):
+    spec = copy.deepcopy(VALID)
+    spec["objects"]["room"]["patterns"] = [entry]
+    message = _message(spec)
+    assert message.startswith("objects.room.patterns[0]: must be a mapping with a 'kind'")
+    assert "'autotile', 'random', 'stamp'" in message

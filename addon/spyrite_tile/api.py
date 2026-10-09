@@ -996,8 +996,29 @@ _AUTOTILE_BITS = (("N", 1, (0, 1)), ("E", 2, (1, 0)), ("S", 4, (0, -1)), ("W", 8
 _PATTERN_ASSIGNMENT_LIMIT = 500
 
 
-def _pattern_tile(label, entry):
-    """Normalise one pattern tile: a name, ``[c, r]`` or ``{tile, rotation_deg, flip_x, flip_y}``."""
+def _pattern_checker(tileset, plane):
+    """Validator for every tile a pattern declares, used or not: name/bounds/plane rule, rotation and flips."""
+
+    def check(label, entry):
+        _as_tile(tileset, label, entry["tile"], plane)
+        try:
+            _as_rotation(entry["rotation_deg"])
+            _as_bool("flip_x", entry["flip_x"])
+            _as_bool("flip_y", entry["flip_y"])
+        except ValueError as error:
+            raise ValueError(f"{label}: {error}") from None
+
+    return check
+
+
+def _pattern_tile(label, entry, check):
+    """Normalise one pattern tile (a name, ``[c, r]`` or ``{tile, rotation_deg, flip_x, flip_y}``) and validate it."""
+    normalized = _pattern_tile_shape(label, entry)
+    check(label, normalized)
+    return normalized
+
+
+def _pattern_tile_shape(label, entry):
     if isinstance(entry, dict):
         unknown = set(entry) - _TILE_ENTRY_KEYS
         if unknown or "tile" not in entry:
@@ -1035,8 +1056,12 @@ def _pattern_cells(cell_min_xy, cell_max_xy, cells):
     return sorted(unique, key=lambda c: (c[1], c[0]))
 
 
-def _pattern_assign(pattern, cells):
-    """Return one normalised tile entry per cell (same order as ``cells``) for a validated-by-kind pattern."""
+def _pattern_assign(pattern, cells, check):
+    """One normalised tile entry per cell (same order as ``cells``).
+
+    ``check(label, entry)`` validates EVERY tile the pattern declares (all random tiles, stamp cells and the
+    16 autotile entries), so a typo is reported even when the fill never reaches it.
+    """
     import random
 
     if not isinstance(pattern, dict):
@@ -1054,7 +1079,7 @@ def _pattern_assign(pattern, cells):
         raw = pattern.get("tiles")
         if isinstance(raw, (str, bytes, dict)) or not hasattr(raw, "__iter__") or not list(raw):
             raise ValueError("pattern.tiles must be a non-empty list of tiles")
-        tiles = [_pattern_tile(f"pattern.tiles[{i}]", t) for i, t in enumerate(raw)]
+        tiles = [_pattern_tile(f"pattern.tiles[{i}]", t, check) for i, t in enumerate(raw)]
         weights = pattern.get("weights")
         if weights is not None:
             if isinstance(weights, (str, bytes, dict)) or not hasattr(weights, "__iter__"):
@@ -1079,7 +1104,7 @@ def _pattern_assign(pattern, cells):
         width = len(rows[0])
         if any(len(r) != width for r in rows):
             raise ValueError(f"pattern.rows must be rectangular; row lengths are {[len(r) for r in rows]}")
-        grid = [[_pattern_tile(f"pattern.rows[{j}][{i}]", t) for i, t in enumerate(r)] for j, r in enumerate(rows)]
+        grid = [[_pattern_tile(f"pattern.rows[{j}][{i}]", t, check) for i, t in enumerate(r)] for j, r in enumerate(rows)]
         x0 = min(c[0] for c in cells)
         y1 = max(c[1] for c in cells)
         return [grid[(y1 - y) % len(grid)][(x - x0) % width] for x, y in cells]
@@ -1096,7 +1121,7 @@ def _pattern_assign(pattern, cells):
     extra = sorted(set(mapping) - {str(k) for k in range(16)})
     if extra:
         raise ValueError(f"pattern.tiles has unknown keys {extra}; valid keys are '0'..'15'")
-    tiles = {k: _pattern_tile(f"pattern.tiles[{k!r}]", v) for k, v in mapping.items()}
+    tiles = {k: _pattern_tile(f"pattern.tiles[{k!r}]", v, check) for k, v in mapping.items()}
     cell_set = set(cells)
     out = []
     for x, y in cells:
@@ -1141,8 +1166,8 @@ def fill_pattern(
     fill_cells = _pattern_cells(cell_min_xy, cell_max_xy, cells)
     _as_plane(plane)
     _as_layer(layer)
-    entries = _pattern_assign(pattern, fill_cells)
     tileset = _find_tileset(material_name)
+    entries = _pattern_assign(pattern, fill_cells, _pattern_checker(tileset, plane))
     placements = [
         {
             "cell_xy": cell,
@@ -1898,7 +1923,9 @@ def select_faces(object_name, where):
     ``where`` is a dict whose keys are all optional and ANDed; an empty dict selects every face:
 
     - ``tile`` (a name from the tileset's sidecar or ``[column, row]``) / ``tiles`` (a list of either): faces
-      whose tile (the span origin for multi tile faces) is one of them; names resolve in the object's tileset;
+      whose tile (the span origin for multi tile faces) is one of them in the object's tileset (names resolve
+      there, and ``[column, row]`` is a tile of that same tileset: faces of another tileset on the object
+      never match, even at the same coordinates);
     - ``tag``: faces whose tile is any sidecar entry carrying that tag;
     - ``plane`` ('XY', 'XZ', 'YZ'), ``plane_offset_m`` (within 1e-4 m), ``layer`` ('BASE'/'DECAL'),
       ``facing`` (1 or -1);
@@ -2013,7 +2040,7 @@ def select_faces(object_name, where):
     for f in faces:
         if region is not None and f["index"] not in region:
             continue
-        if wanted_tiles is not None and f["tile_xy"] not in wanted_tiles:
+        if wanted_tiles is not None and (f["tileset"] != object_tileset.material.name or f["tile_xy"] not in wanted_tiles):
             continue
         if tag is not None and not has_tag(f):
             continue
@@ -2130,7 +2157,7 @@ def _read_spec_file(spec_path):
         return spec_path, handle.read()
 
 
-def _spec_placements(spec_object):
+def _spec_placements(spec_object, tileset):
     """(placements, origins) of an object spec: fills expanded cell by cell, then tiles; origins name each in the spec."""
     placements = []
     origins = []
@@ -2149,9 +2176,14 @@ def _spec_placements(spec_object):
     for i, entry in enumerate(spec_object.get("patterns", ())):
         try:
             cells = _pattern_cells(entry.get("cell_min_xy"), entry.get("cell_max_xy"), entry.get("cells"))
-            assigned = _pattern_assign(entry["pattern"], cells)
+            assigned = _pattern_assign(entry["pattern"], cells, _pattern_checker(tileset, entry["plane"]))
         except ValueError as error:
-            raise spyrite_spec.SpecError(f"patterns[{i}]: {error}") from None
+            message = str(error)
+            if message.startswith("pattern."):
+                message = message.replace("pattern.", f"patterns[{i}].", 1)
+            else:
+                message = f"patterns[{i}]: {message}"
+            raise spyrite_spec.SpecError(message) from None
         for cell, tile in zip(cells, assigned):
             placements.append(
                 {"cell_xy": cell, "tile": tile["tile"]}
@@ -2248,7 +2280,7 @@ def build_spec(spec_path):
         material_name = tileset_reports[entry["tileset"]]["material_name"]
         tileset = _find_tileset(material_name)
         try:
-            placements, origins = _spec_placements(entry)
+            placements, origins = _spec_placements(entry, tileset)
         except spyrite_spec.SpecError as error:
             raise spyrite_spec.SpecError(f"objects.{name}.{error}") from None
         normalized = []

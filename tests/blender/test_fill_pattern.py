@@ -4,6 +4,7 @@ Fixture: tests/fixtures/tiles_16px.png (64x64, 4x4 tiles of 16 px).
 """
 
 import importlib
+import random
 import shutil
 from pathlib import Path
 
@@ -67,6 +68,18 @@ def test_random_is_deterministic(board):
     assert first["assignments"] == second["assignments"]
     assert _face_tiles() == _by_cell(first)
     assert len(set(_by_cell(first).values())) > 1
+
+
+def test_random_follows_the_documented_algorithm(board):
+    """One Random(seed), one choices(tiles, weights) draw per cell, y outer / x inner ascending."""
+    tiles = [[0, 0], [1, 0], [2, 0]]
+    weights = [1, 2, 3]
+    cells = [(x, y) for y in range(6) for x in range(6)]
+    rng = random.Random(7)
+    expected = [rng.choices(tiles, weights)[0] for _ in cells]
+    report = _fill({"kind": "random", "tiles": tiles, "weights": weights, "seed": 7}, cell_min_xy=[0, 0], cell_max_xy=[5, 5])
+    assert [a["cell_xy"] for a in report["assignments"]] == [list(c) for c in cells]
+    assert [a["tile_xy"] for a in report["assignments"]] == expected
 
 
 def test_random_weights_bias(board):
@@ -148,6 +161,42 @@ def test_errors_leave_the_object_untouched(board, pattern, kwargs, message):
     assert api.describe_tile_object(OBJECT)["face_count"] == 0
 
 
+def test_unused_autotile_entry_is_still_validated(board):
+    tiles = dict(AUTOTILE, **{"15": "lava"})  # cells (0,0)-(2,0) only ever need keys 2, 10 and 8
+    with pytest.raises(ValueError, match=r"pattern\.tiles\['15'\]: unknown tile name 'lava'"):
+        _fill({"kind": "autotile", "mask": "edges4", "tiles": tiles}, cell_min_xy=[0, 0], cell_max_xy=[2, 0])
+    assert api.describe_tile_object(OBJECT)["face_count"] == 0
+
+
+def test_unreachable_random_tile_is_still_validated(board):
+    pattern = {"kind": "random", "tiles": [[0, 0], [99, 99]], "weights": [1, 1e-9], "seed": 1}
+    with pytest.raises(ValueError, match=r"pattern\.tiles\[1\]"):
+        _fill(pattern, cell_min_xy=[0, 0], cell_max_xy=[0, 0])
+    assert api.describe_tile_object(OBJECT)["face_count"] == 0
+
+
+def test_bad_stamp_tile_names_its_position(board):
+    pattern = {"kind": "stamp", "rows": [["grass", "lava"]]}
+    with pytest.raises(ValueError, match=r"pattern\.rows\[0\]\[1\]: unknown tile name 'lava'"):
+        _fill(pattern, cells=[[0, 0]])  # the single cell only ever shows rows[0][0]
+    bad = {"kind": "stamp", "rows": [["grass", {"tile": "stone", "rotation_deg": 45}]]}
+    with pytest.raises(ValueError, match=r"pattern\.rows\[0\]\[1\]: rotation_deg must be one of"):
+        _fill(bad, cells=[[0, 0]])
+    assert api.describe_tile_object(OBJECT)["face_count"] == 0
+
+
+def test_plane_rule_of_an_unused_pattern_tile_is_enforced(tmp_path):
+    image = tmp_path / "tiles.png"
+    shutil.copy(FIXTURE_IMAGE, image)
+    (tmp_path / "tiles.spyrite.yaml").write_text(
+        "spyrite_tileset: 1\ntiles:\n  grass: {xy: [0, 0]}\n  wall: {xy: [2, 0], planes: [XZ]}\n", encoding="utf-8"
+    )
+    api.create_tileset(TILESET, str(image), (16, 16))
+    api.create_tile_object(OBJECT, TILESET, 16)
+    with pytest.raises(ValueError, match=r"pattern\.tiles\[1\]: tile 'wall' is not allowed on plane XY"):
+        _fill({"kind": "random", "tiles": ["grass", "wall"], "weights": [1, 1e-9], "seed": 1}, cells=[[0, 0]])
+
+
 SPEC = f"""\
 spyrite_spec: 1
 pixels_per_unit: 16
@@ -207,6 +256,6 @@ def test_spec_pattern_errors_name_the_object(tmp_path):
     with pytest.raises(ValueError, match=rf"objects.{OBJECT}.patterns\[0\].weights: must be a list of 2"):
         api.build_spec(_spec_file(tmp_path, bad))
     bad = SPEC.replace("[grass, stone]", "[grass, lava]")
-    with pytest.raises(ValueError, match=rf"objects.{OBJECT}.patterns\[0\]\.tile: unknown tile name .lava."):
+    with pytest.raises(ValueError, match=rf"objects.{OBJECT}.patterns\[0\]\.tiles\[1\]: unknown tile name .lava."):
         api.build_spec(_spec_file(tmp_path, bad))
     assert bpy.data.objects.get(OBJECT) is None

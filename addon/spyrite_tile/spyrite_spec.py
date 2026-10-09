@@ -214,7 +214,8 @@ def _entries(path, value, valid, build):
     for i, entry in enumerate(value):
         here = f"{path}[{i}]"
         if not isinstance(entry, dict):
-            raise SpecError(f"{here}: must be a mapping with keys {list(valid)}, got {entry!r}")
+            keys = f"keys {list(valid)}" if valid is not None else f"a 'kind' ({sorted(_PATTERN_KINDS)}) and that kind's keys"
+            raise SpecError(f"{here}: must be a mapping with {keys}, got {entry!r}")
         if valid is not None:
             _unknown_keys(here, entry, valid)
         out.append(build(here, entry))
