@@ -376,6 +376,10 @@ def _face_at(cell, layer="BASE", plane="XY"):
     )
 
 
+def _face_by_index(index):
+    return next(f for f in _faces() if f["index"] == index)
+
+
 def _orientation(face):
     return {key: face[key] for key in ("tile_xy", "tile_span", "rotation_deg", "flip_x", "flip_y", "layer", "plane")}
 
@@ -519,3 +523,164 @@ def test_move_faces_restores_scene_settings(tile_object):
     assert {name: getattr(data, name) for name in saved} == saved
     assert tuple(grid.tile_selection) == selection
     assert bpy.data.objects[OBJECT].mode == "OBJECT"
+
+
+def _vertex_uvs(face_index):
+    """{vertex position relative to the face centre (local, 4 dp): (u, v)}: which corner got which UV."""
+    mesh = bmesh.new()
+    mesh.from_mesh(bpy.data.objects[OBJECT].data)
+    try:
+        mesh.faces.ensure_lookup_table()
+        uv_layer = mesh.loops.layers.uv.verify()
+        face = mesh.faces[face_index]
+        center = face.calc_center_bounds()
+        return {
+            tuple(round(c, 4) for c in (loop.vert.co - center)): (loop[uv_layer].uv[0], loop[uv_layer].uv[1])
+            for loop in face.loops
+        }
+    finally:
+        mesh.free()
+
+
+def _assert_vertex_uvs_equal(actual, expected):
+    assert actual.keys() == expected.keys()
+    for key, want in expected.items():
+        assert actual[key] == pytest.approx(want, abs=1e-6), f"corner {key}"
+
+
+@pytest.mark.parametrize(
+    "cell, tile, span",
+    [
+        ((0, 0), [2, 2], [2, 1]),  # span ends on the last tileset column
+        ((0, 0), [3, 1], [1, 2]),  # a one-column span on the last column
+        ((2, 1), [0, 0], [2, 2]),  # an interior span
+    ],
+)
+def test_move_faces_keeps_uvs_of_spans_on_the_last_tileset_column(tile_object, cell, tile, span):
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": cell, "tile_xy": tile, "tile_span": span}])
+    face = _face_at(cell)
+    assert face["tile_span"] == span and face["tile_xy"] == tile
+    before = _vertex_uvs(face["index"])
+    assert all(0.0 <= u <= 1.0 and 0.0 <= v <= 1.0 for u, v in before.values())
+
+    api.move_faces(OBJECT, [face["index"]], (0, 16, 0))
+
+    after = _face_by_index(face["index"])
+    assert after["tile_xy"] == tile and after["tile_span"] == span
+    _assert_vertex_uvs_equal(_vertex_uvs(face["index"]), before)
+
+
+@pytest.mark.parametrize("rotation, flip_x", [(0, False), (90, True)])
+def test_move_faces_keeps_uvs_of_reversed_faces(tile_object, rotation, flip_x):
+    api.place_tiles(
+        OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [1, 1], "rotation_deg": rotation, "flip_x": flip_x}]
+    )
+    obj = bpy.data.objects[OBJECT]
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    bmesh.ops.reverse_faces(mesh, faces=list(mesh.faces))
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    obj.data.update()
+    face = _face_at((0, 0))
+    assert face["facing"] == -1
+    before = _vertex_uvs(face["index"])
+
+    api.move_faces(OBJECT, [face["index"]], (16, 0, 0))
+
+    after = _face_by_index(face["index"])
+    assert after["facing"] == -1 and _orientation(after) == _orientation(face)
+    _assert_vertex_uvs_equal(_vertex_uvs(face["index"]), before)
+
+
+def _widen_first_face_and_store_paint_mode(**paint):
+    """Stretch the face to 2 m x 1 m and store the paint settings of a Paint-tool face with ``paint``."""
+    obj = bpy.data.objects[OBJECT]
+    data = bpy.context.scene.sprytile_data
+    saved = {name: getattr(data, name) for name in ("paint_mode", *paint)}
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    try:
+        mesh.faces.ensure_lookup_table()
+        for vert in mesh.faces[0].verts:
+            if vert.co.x > 0.5:
+                vert.co.x += 1.0
+        data.paint_mode = "PAINT"
+        for name, value in paint.items():
+            setattr(data, name, value)
+        stored = sprytile_core.get_paint_settings(data)
+        mesh.faces[0][mesh.faces.layers.int.get("paint_settings")] = stored
+        mesh.to_mesh(obj.data)
+    finally:
+        mesh.free()
+        for name, value in saved.items():
+            setattr(data, name, value)
+    obj.data.update()
+    return stored
+
+
+def test_move_faces_rebuilds_paint_tool_faces_the_way_they_were_painted(tile_object):
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [1, 1]}])
+    _widen_first_face_and_store_paint_mode(
+        paint_align="CENTER", paint_uv_snap=True, paint_edge_snap=False, paint_stretch_x=True, paint_stretch_y=True
+    )
+    api.move_faces(OBJECT, [0], (16, 0, 0))
+    uvs = list(_vertex_uvs(0).values())
+    # stretched: the 2 m wide face shows exactly tile (1, 1): columns 1/4..2/4 and rows 2/4..3/4 from the top
+    assert min(u for u, _ in uvs) >= 0.25 - 1e-3 and max(u for u, _ in uvs) <= 0.5 + 1e-3
+    assert max(u for u, _ in uvs) - min(u for u, _ in uvs) > 0.2
+    assert min(v for _, v in uvs) >= 0.5 - 1e-3 and max(v for _, v in uvs) <= 0.75 + 1e-3
+
+
+def test_move_faces_keeps_the_scene_paint_settings(tile_object):
+    data = bpy.context.scene.sprytile_data
+    names = ("paint_mode", "paint_align", "paint_uv_snap", "paint_edge_snap", "paint_stretch_x", "paint_stretch_y")
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [1, 1]}])
+    _widen_first_face_and_store_paint_mode(paint_align="TOP_LEFT", paint_stretch_x=True)
+    data.paint_stretch_y = True
+    data.paint_edge_snap = True
+    saved = {name: getattr(data, name) for name in names}
+    api.move_faces(OBJECT, [0], (16, 0, 0))
+    assert {name: getattr(data, name) for name in names} == saved
+
+
+def test_move_faces_refuses_faces_without_tile_data(tile_object):
+    api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [1, 1]}])
+    obj = bpy.data.objects[OBJECT]
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    verts = [mesh.verts.new(co) for co in ((5, 5, 0), (6, 5, 0), (5, 6, 0))]
+    mesh.faces.new(verts)
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    obj.data.update()
+    before = [list(f["center_m"]) for f in _faces()]
+    assert len(before) == 2
+
+    with pytest.raises(ValueError, match=re.escape("faces [1] have no tile data")):
+        api.move_faces(OBJECT, [0, 1], (16, 0, 0))
+    assert [list(f["center_m"]) for f in _faces()] == before  # nothing moved, not even the tiled face
+
+
+def test_move_faces_moves_in_world_space_on_a_transformed_object(tile_object):
+    import math
+
+    obj = bpy.data.objects[OBJECT]
+    obj.location = (3.0, -2.0, 1.0)
+    obj.rotation_euler = (0.0, 0.0, math.radians(90))
+    bpy.context.view_layer.update()
+    api.place_tiles(
+        OBJECT, TILESET, [{"cell_xy": [2, 1], "tile_xy": [3, 2], "rotation_deg": 90, "flip_x": True}]
+    )
+    face = _face_by_index(0)
+    before_uvs = _vertex_uvs(0)
+
+    def world_center():
+        return obj.matrix_world @ obj.data.polygons[0].center
+
+    start = world_center()
+    api.move_faces(OBJECT, [0], (32, -16, 16))
+    shift = world_center() - start
+    assert list(shift) == pytest.approx([2.0, -1.0, 1.0], abs=1e-5)  # world pixels, not local
+    assert _orientation(_face_by_index(0)) == _orientation(face)
+    _assert_vertex_uvs_equal(_vertex_uvs(0), before_uvs)

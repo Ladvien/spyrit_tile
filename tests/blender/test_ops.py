@@ -466,6 +466,14 @@ def test_extrude_edge_matches_api(tileset):
         ops.extrude_edge(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (1, 0), "S", 1, (1, 0))
 
 
+@pytest.mark.parametrize("count", [0, -1, 1.5, True])
+def test_extrude_edge_errors_name_count_not_height_cells(tileset, count):
+    _create_object_pair()
+    with pytest.raises(ValueError, match=r"^count must be an integer >= 1") as error:
+        ops.extrude_edge(OPS_OBJECT_NAME, TILESET_NAME, (0, 0), (1, 0), "N", count, (1, 0))
+    assert "height_cells" not in str(error.value)
+
+
 def test_move_faces_matches_api(tileset):
     _create_object_pair()
     for name in (OPS_OBJECT_NAME, API_OBJECT_NAME):

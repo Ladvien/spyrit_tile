@@ -266,6 +266,10 @@ _DATA_FIELDS = (
     "mesh_rotate",
     "paint_align",
     "paint_mode",
+    "paint_uv_snap",
+    "paint_edge_snap",
+    "paint_stretch_x",
+    "paint_stretch_y",
     "work_layer",
     "work_layer_mode",
     "world_pixels",
@@ -1559,6 +1563,11 @@ def extrude_edge(
     }
 
 
+# Low byte of paint_settings that sprytile_core.get_paint_settings writes in MAKE_FACE mode: centre align (5)
+# and the four toggle bits (4-7) all on
+_MAKE_FACE_SETTINGS = 5 + sum(1 << bit for bit in range(4, 8))
+
+
 def move_faces(object_name, face_indices, delta_px):
     """Translate faces by whole world pixels and re-apply their UVs, so the textures stay consistent.
 
@@ -1567,8 +1576,15 @@ def move_faces(object_name, face_indices, delta_px):
     moved move too (no edge is split), so neighbours deform as with Blender's G. Each moved face's UVs are
     rebuilt from the tile data stored on it (grid, tile and span, orientation, layer) through the path
     :func:`paint_faces` uses, so ``tile_xy``, ``rotation_deg``, ``flip_x``, ``flip_y`` and ``layer`` read
-    back unchanged. A face without tile data is refused: give it a tile with :func:`paint_faces` first.
-    ``face_indices`` are mesh face indices as listed by :func:`describe_tile_object`.
+    back unchanged. A face without tile data is refused (the error names its indices): give it a tile with
+    :func:`paint_faces` first. ``face_indices`` are mesh face indices as listed by :func:`describe_tile_object`.
+
+    A face on an axis plane is rebuilt in that plane's fixed frame, as :func:`place_tiles` builds it, whichever
+    way its normal points; any other face uses the :func:`paint_faces` frame. The paint mode stored on the
+    face is restored: faces whose settings are Sprytile's make-face signature (centre align, every toggle on;
+    everything this API places) are rebuilt like placements, any other settings like the Paint tool painted
+    them (alignment, UV and edge snap, stretch). A Paint-tool face painted with exactly the make-face
+    signature cannot be told apart and is rebuilt as a placement.
     Returns ``{moved, face_count}``.
     """
     obj = _mesh_object(object_name)
@@ -1603,33 +1619,49 @@ def move_faces(object_name, face_indices, delta_px):
         work_layer = mesh.faces.layers.int.get(UvDataLayers.WORK_LAYER)
         tileset_cache = {}
         plans = []
+        untiled = []
         for index in unique:
             face = mesh.faces[index]
             tileset = _cached_tileset(obj, face[grid_layer], tileset_cache)
-            if tileset is None:
-                raise ValueError(
-                    f"face {index} has no tile data (no tileset grid); give it a tile with paint_faces first"
-                )
             tile_id = face[tile_layer]
+            origin_id = face[origin_layer]
+            stored = face[paint_layer]
+            # Layers a face never had read as zeros (grid 0 is a real grid, so the grid alone proves nothing)
+            if tileset is None or (
+                stored == 0 and face[width_layer] == 0 and face[height_layer] == 0 and tile_id == 0 and origin_id in (0, -1)
+            ):
+                untiled.append(index)
+                continue
             span_x = max(1, face[width_layer])
             span_y = max(1, face[height_layer])
-            origin_id = face[origin_layer]
             # Same fallbacks as _face_tile_xy: data from before origin/width/height existed
             if origin_id == -1 or (origin_id == 0 and face[height_layer] == 0 and face[width_layer] == 0):
                 origin_id = tile_id
             row_size = tileset.row_size
-            rotation, orient_x, orient_y = _decode_orientation(face[paint_layer])
+            origin = (origin_id % row_size, origin_id // row_size)
+            rotation, orient_x, orient_y = _decode_orientation(stored)
+            # Same tile coordinate as _apply_placements: a span's is the end of the selection, which can
+            # run past the last column, so it cannot be read back from the stored (wrapped) tile id
+            if span_x == 1 and span_y == 1:
+                tile_coord = origin
+            else:
+                tile_coord = (origin[0] + span_x, origin[1] + span_y)
             plans.append(
                 {
                     "index": index,
                     "tileset": tileset,
-                    "tile_coord": (tile_id % row_size, tile_id // row_size),
-                    "origin": (origin_id % row_size, origin_id // row_size),
+                    "tile_coord": tile_coord,
+                    "origin": origin,
                     "span": (span_x, span_y),
                     "rotation": rotation,
                     "flips": _sprytile_flips(rotation, orient_x, orient_y),
                     "decal": face[work_layer] != 0,
+                    "paint_settings": stored,
                 }
+            )
+        if untiled:
+            raise ValueError(
+                f"faces {untiled} have no tile data (no tileset grid); give them a tile with paint_faces first"
             )
 
         with ExitStack() as stack:
@@ -1639,8 +1671,6 @@ def move_faces(object_name, face_indices, delta_px):
             for grid in grids.values():
                 data = stack.enter_context(_preserved_settings(obj, grid))
             data.world_pixels = ppu
-            data.paint_mode = "MAKE_FACE"
-            data.paint_align = "CENTER"
             data.work_layer_mode = "MESH_DECAL"
 
             moved_verts = {vert for index in unique for vert in mesh.faces[index].verts}
@@ -1653,12 +1683,22 @@ def move_faces(object_name, face_indices, delta_px):
                 span_x, span_y = plan["span"]
                 origin_x, origin_y = plan["origin"]
                 obj.sprytile_gridid = grid.id
+                data.paint_align = "CENTER"
+                if plan["paint_settings"] & 0xFF == _MAKE_FACE_SETTINGS:
+                    data.paint_mode = "MAKE_FACE"
+                else:
+                    data.paint_mode = "PAINT"
+                    sprytile_core.from_paint_settings(data, plan["paint_settings"])
                 data.uv_flip_x, data.uv_flip_y = plan["flips"]
                 data.mesh_rotate = math.radians(plan["rotation"])
                 data.work_layer = "DECAL_1" if plan["decal"] else "BASE"
                 grid.tile_selection = (origin_x, origin_y, span_x, span_y)
                 world_normal = (normal_matrix @ mesh.faces[plan["index"]].normal).normalized()
-                right, up = _face_frame(world_normal)
+                face_plane, _ = _face_plane(world_normal)
+                if face_plane is None:
+                    right, up = _face_frame(world_normal)
+                else:
+                    right, up = Vector(PLANES[face_plane]["right"]), Vector(PLANES[face_plane]["up"])
                 uv_right, uv_up = _rotated_frame(right, up, plan["rotation"])
                 painted_index, _ = sprytile_uv.uv_map_face(
                     context,
