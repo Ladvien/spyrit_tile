@@ -912,15 +912,28 @@ def set_pixel_art_view():
     ``render_views`` and viewport renders of a tile object show no pixel art by default. This sets the
     scene's Workbench shading to ``color_type='TEXTURE'`` and ``light='FLAT'`` (no lighting), turns
     anti-aliasing off (``display.render_aa='OFF'``) and the view transform to ``Standard`` (AgX would shift
-    the colours). Tileset images already use ``Closest`` interpolation. The previous values are not restored;
-    returns ``{color_type, light, render_aa, view_transform}`` as they are now.
+    the colours). Tileset images already use ``Closest`` interpolation. Every open 3D viewport in Solid
+    shading gets the same texture colour type, since a person looking at the scene otherwise sees grey
+    tiles too. The previous values are not restored; returns ``{color_type, light, render_aa,
+    view_transform, viewports_textured}`` as they are now.
     """
     scene = bpy.context.scene
     scene.display.shading.color_type = "TEXTURE"
     scene.display.shading.light = "FLAT"
     scene.display.render_aa = "OFF"
     scene.view_settings.view_transform = "Standard"
+    viewports_textured = 0
+    for window in bpy.context.window_manager.windows:
+        for area in window.screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            shading = area.spaces.active.shading
+            if shading.type == "SOLID":
+                shading.color_type = "TEXTURE"
+                viewports_textured += 1
+                area.tag_redraw()
     return {
+        "viewports_textured": viewports_textured,
         "color_type": scene.display.shading.color_type,
         "light": scene.display.shading.light,
         "render_aa": scene.display.render_aa,
