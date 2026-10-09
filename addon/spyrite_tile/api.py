@@ -305,12 +305,39 @@ def _find_tileset(material_name):
     return _Tileset(material, mat_data, mat_data.grids[0], image)
 
 
+def _find_tileset_for_image(abs_path, tile_size_px, padding_px, margin_px):
+    """The registered tileset built from this image file with this exact layout, or ``None``.
+
+    Compares the resolved path of each tileset material's image texture and its first grid's tile size,
+    padding and margin. Tilesets removed with the grid "-" button are skipped, so reuse never resurrects one.
+    """
+    wanted = os.path.realpath(abs_path)
+    layout = (tuple(tile_size_px), tuple(padding_px), tuple(margin_px))
+    for mat_data in bpy.context.scene.sprytile_mats:
+        material = bpy.data.materials.get(mat_data.mat_id)
+        if material is None or len(mat_data.grids) == 0:
+            continue
+        if material.session_uid in sprytile_utils._removed_tilesets:
+            continue
+        image = sprytile_utils.get_material_texture(material)
+        if image is None or os.path.realpath(bpy.path.abspath(image.filepath)) != wanted:
+            continue
+        grid = mat_data.grids[0]
+        if (tuple(grid.grid), tuple(grid.padding), tuple(grid.margin)) == layout:
+            return _Tileset(material, mat_data, grid, image)
+    return None
+
+
 def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), margin_px=(0, 0, 0, 0)):
     """Register an image as a tileset: a shadeless pixel-art material plus a Sprytile grid.
 
     A material named ``material_name`` is created (or reused and rebuilt) around the image and given a fake
     user so the tileset survives before any object uses it. Re-running with the same name updates the image
-    and grid. Returns ``{material_name, image_name, image_size_px, tile_size_px, columns, rows, grid_id}``.
+    and grid. Idempotent per image: when no material named ``material_name`` exists but another tileset already
+    uses the same image file with the same tile size, padding and margin, no material is created and that
+    tileset is returned with ``reused_material`` set to its name. Always use the returned ``material_name``
+    afterwards. Returns ``{material_name, image_name, image_size_px, tile_size_px, columns, rows, grid_id,
+    reused_material}`` (``reused_material`` is ``None`` unless an existing tileset was reused).
     """
     _as_name("material_name", material_name)
     if not isinstance(image_path, (str, os.PathLike)):
@@ -352,6 +379,18 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
 
     material = bpy.data.materials.get(material_name)
     if material is None:
+        existing = _find_tileset_for_image(image_path, tile_size, padding, margin)
+        if existing is not None:
+            return {
+                "material_name": existing.material.name,
+                "image_name": existing.image.name,
+                "image_size_px": [image.size[0], image.size[1]],
+                "tile_size_px": [tile_size[0], tile_size[1]],
+                "columns": columns,
+                "rows": rows,
+                "grid_id": existing.grid.id,
+                "reused_material": existing.material.name,
+            }
         material = bpy.data.materials.new(material_name)
     material.use_fake_user = True
     sprytile_utils.restore_removed_tileset(material)
@@ -383,6 +422,7 @@ def create_tileset(material_name, image_path, tile_size_px, padding_px=(0, 0), m
         "columns": columns,
         "rows": rows,
         "grid_id": grid.id,
+        "reused_material": None,
     }
 
 

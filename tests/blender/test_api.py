@@ -17,6 +17,7 @@ api = importlib.import_module("bl_ext.user_default.spyrite_tile.api")
 sprytile_utils = importlib.import_module("bl_ext.user_default.spyrite_tile.sprytile_utils")
 
 FIXTURE_IMAGE = Path(__file__).resolve().parent.parent / "fixtures" / "tiles_16px.png"
+OTHER_IMAGE = FIXTURE_IMAGE.with_name("tiles_oriented_16px.png")  # a second image: the same image + layout would reuse the tileset
 PREFIX = "api_test_"
 TILESET = PREFIX + "tiles"
 OBJECT = PREFIX + "obj"
@@ -433,7 +434,7 @@ def test_pixels_per_unit_scales_the_cell(tileset):
 
 
 def test_two_tilesets_on_one_object_get_their_own_material_slots(tile_object):
-    api.create_tileset(PREFIX + "other", str(FIXTURE_IMAGE), (TILE_PX, TILE_PX))
+    api.create_tileset(PREFIX + "other", str(OTHER_IMAGE), (TILE_PX, TILE_PX))
     api.place_tiles(OBJECT, TILESET, [{"cell_xy": (0, 0), "tile_xy": (0, 0)}])
     api.place_tiles(OBJECT, PREFIX + "other", [{"cell_xy": (1, 0), "tile_xy": (0, 0)}])
     described = api.describe_tile_object(OBJECT)
@@ -523,7 +524,7 @@ def test_paint_agrees_with_place_on_every_plane(tile_object, plane, rotation):
 
 
 def test_paint_faces_sets_the_tilesets_material(tileset):
-    api.create_tileset(PREFIX + "other", str(FIXTURE_IMAGE), (TILE_PX, TILE_PX))
+    api.create_tileset(PREFIX + "other", str(OTHER_IMAGE), (TILE_PX, TILE_PX))
     api.create_tile_object(OBJECT, TILESET, PPU)
     api.place_tiles(OBJECT, TILESET, [{"cell_xy": (0, 0), "tile_xy": (0, 0)}])
     api.paint_faces(OBJECT, PREFIX + "other", [0], (1, 1))
