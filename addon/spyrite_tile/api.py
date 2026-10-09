@@ -84,11 +84,13 @@ Specs
     ``spyrite_spec.validate_spec`` for the schema and ``tests/fixtures/room.spyrite.yaml`` for an example.
 
 Checkpoints
-    :func:`checkpoint` copies tile objects' meshes (and grid id, pixels per unit, material slots, world
-    matrix) so a multi-step plan can :func:`rollback` after a failure; :func:`list_checkpoints` and
+    :func:`checkpoint` copies tile objects' meshes (and grid id, pixels per unit, material slots, local
+    transform, parent) so a multi-step plan can :func:`rollback` after a failure; :func:`list_checkpoints` and
     :func:`discard_checkpoint` manage them. Checkpoints are session state: the registry lives in this module
-    (so a ``reload_core`` or a file reload forgets it), and the copies are hidden ``.spyrite_ckpt_*`` meshes
-    with a fake user, which stay in the file if it is saved while checkpoints are unreleased.
+    and survives ``reload_core`` (ids keep counting). The copies are hidden ``.spyrite_ckpt_*`` meshes with a
+    fake user, which stay in the file if it is saved while checkpoints are unreleased; after a file reload
+    the registry still holds the dead references, and the next ``list_checkpoints``/``rollback``/
+    ``discard_checkpoint`` drops those checkpoints (rollback says so in a ``ValueError``).
 
 Behaviour shared by all editing functions
     * Inputs are validated before anything is touched; errors are
@@ -211,7 +213,8 @@ def reload_core():
 
     ``sprytile_core._removed_tilesets`` is session state and is reset by the
     reload: tilesets removed with the grid "-" button are listed again by the
-    next validate_grids. Call this function through ``api`` only (modules held
+    next validate_grids. The checkpoint registry is kept (``api`` carries it
+    over), so checkpoints taken before the reload can still be rolled back. Call this function through ``api`` only (modules held
     from before the reload keep the old code for names rebound by ``import``).
 
     Returns ``{"reloaded": [module names]}``.
@@ -2485,6 +2488,28 @@ def _tile_pixel_box(tileset, tile_xy, tile_span):
     return (x0, y0, x0 + width_px, y0 + height_px)
 
 
+def _render_blocking_collection(scene, obj):
+    """Name of the collection keeping ``obj`` out of renders, or None when some collection path renders it.
+
+    A collection with ``hide_render`` hides everything under it; an object linked into several collections
+    still renders through any path without one.
+    """
+    reasons = []
+
+    def walk(collection, blocker):
+        if blocker is None and collection.hide_render:
+            blocker = collection.name
+        if obj.name in collection.objects:
+            reasons.append(blocker)
+        for child in collection.children:
+            walk(child, blocker)
+
+    walk(scene.collection, None)
+    if reasons and all(reason is not None for reason in reasons):
+        return reasons[0]
+    return None
+
+
 def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=None):
     """Render a tile object with Workbench and check every visible face shows the tile its data claims.
 
@@ -2497,11 +2522,16 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
     ``view`` is ``'top'`` (plane XY, camera above), ``'front'`` (XZ, camera on the -Y side), ``'right'`` (YZ,
     camera on the +X side) or ``'auto'``: the plane holding most faces. ``tolerance`` is the largest accepted
     channel difference, on a 0-255 scale. Faces are judged when they look at the camera, are whole-cell
-    rectangles with tile data (``on_grid``) and are not hidden under a nearer face (a decal hides its base).
+    rectangles with tile data (``on_grid``) and are not hidden under a nearer face (a decal hides its base;
+    so does a nearer face of the object that looks away from the camera or is slanted).
     The scene is rendered with ``BLENDER_WORKBENCH`` using the ``set_pixel_art_view`` values, an orthographic
     camera framing the object (1.05 x the larger view extent) and every other object hidden from the render,
     at a resolution of at least 32 px per cell (at most 2048 px; a cell must still get 8 px, else a
-    ``ValueError`` asks you to verify a smaller object).
+    ``ValueError`` asks you to verify a smaller object). Output settings that would change the picture are
+    neutralised for the render: image output (also a video ``media_type``), colour management of the output,
+    view transform, look, exposure, gamma, curve mapping, display device, stamp, render border, compositor,
+    sequencer, dither and transparent film. A target excluded from renders by its collection's ``hide_render``
+    raises a ``ValueError`` naming the collection (the object's own ``hide_render`` is overridden).
 
     Everything touched (render and shading settings, camera, hidden objects, mode) is put back and the
     temporary camera and image datablocks are removed, so the scene is unchanged; the render is written to
@@ -2527,6 +2557,12 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
     if grid is None:
         raise ValueError(f"Object {obj.name!r} has no tileset grid (sprytile_gridid {obj.sprytile_gridid}); "
                          f"call create_tile_object first")
+    blocker = _render_blocking_collection(bpy.context.scene, obj)
+    if blocker is not None:
+        raise ValueError(
+            f"Object {obj.name!r} is not rendered: collection {blocker!r} has hide_render set; "
+            f"enable it in the render (or move the object to a rendered collection) before verifying"
+        )
 
     scene = bpy.context.scene
     view_layer = bpy.context.view_layer
@@ -2579,15 +2615,18 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
             "render": {name: getattr(render, name) for name in (
                 "engine", "resolution_x", "resolution_y", "resolution_percentage", "pixel_aspect_x",
                 "pixel_aspect_y", "filepath", "use_file_extension", "film_transparent", "use_compositing",
-                "use_sequencer")},
+                "use_sequencer", "use_stamp", "use_border", "dither_intensity")},
+            # media_type first: a video scene only accepts the video file formats until it is set to IMAGE
             "image_settings": {name: getattr(render.image_settings, name) for name in (
-                "file_format", "color_mode", "color_depth")},
+                "media_type", "file_format", "color_mode", "color_depth", "color_management")},
             "view_settings": {name: getattr(view_settings, name) for name in (
-                "view_transform", "look", "exposure", "gamma")},
+                "view_transform", "look", "exposure", "gamma", "use_curve_mapping")},
+            "display_settings": {"display_device": scene.display_settings.display_device},
         }
         targets = {
             "scene": scene, "shading": shading, "display": scene.display, "render": render,
             "image_settings": render.image_settings, "view_settings": view_settings,
+            "display_settings": scene.display_settings,
         }
         hidden_before = {other: other.hide_render for other in scene.objects}
         camera_data = camera_object = image = None
@@ -2603,15 +2642,22 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
             view_settings.look = "None"
             view_settings.exposure = 0.0
             view_settings.gamma = 1.0
+            view_settings.use_curve_mapping = False
+            scene.display_settings.display_device = "sRGB"
             render.resolution_x = render.resolution_y = resolution
             render.resolution_percentage = 100
             render.pixel_aspect_x = render.pixel_aspect_y = 1.0
             render.film_transparent = False
             render.use_compositing = False
             render.use_sequencer = False
+            render.use_stamp = False
+            render.use_border = False
+            render.dither_intensity = 0.0
             render.use_file_extension = False
             render.filepath = render_path
+            render.image_settings.media_type = "IMAGE"
             render.image_settings.file_format = "PNG"
+            render.image_settings.color_management = "FOLLOW_SCENE"
             render.image_settings.color_mode = "RGB"
             render.image_settings.color_depth = "8"
 
@@ -2647,12 +2693,12 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
                 )
             shot = _image_picture(image)
 
-            # Nearest face first: a face whose measured region lies under a nearer one is not judged
+            # Nearest face first: a face whose measured region lies under a nearer one is not judged. Every
+            # face covers what is behind it (Workbench draws back faces too); only faces looking at the
+            # camera are judged themselves.
             mesh = obj.data
             candidates = []
             for face in faces:
-                if Vector(face["normal"]).dot(toward_camera) <= 0.9:
-                    continue
                 points = [
                     world_to_camera_view(scene, camera_object, world @ mesh.vertices[i].co)
                     for i in mesh.polygons[face["index"]].vertices
@@ -2660,7 +2706,8 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
                 xs = [p.x * resolution for p in points]
                 ys = [(1.0 - p.y) * resolution for p in points]
                 box = (min(xs), min(ys), max(xs), max(ys))
-                candidates.append((Vector(face["center_m"]).dot(toward_camera), face, box))
+                faces_camera = Vector(face["normal"]).dot(toward_camera) > 0.9
+                candidates.append((Vector(face["center_m"]).dot(toward_camera), face, box, faces_camera))
             candidates.sort(key=lambda item: -item[0])
 
             tilesets, tile_pictures = {}, {}
@@ -2668,10 +2715,10 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
             measured = 0
             max_delta = 0.0
             mismatches = []
-            for face_depth, face, box in candidates:
+            for face_depth, face, box, faces_camera in candidates:
                 hidden = spyrite_probe.covered(box, [b for d, b in nearer if d > face_depth + 1e-6])
                 nearer.append((face_depth, box))
-                if hidden or not face["on_grid"] or face["tile_xy"] == NO_TILE_XY or not face["tileset"]:
+                if not faces_camera or hidden or not face["on_grid"] or face["tile_xy"] == NO_TILE_XY or not face["tileset"]:
                     continue
                 if box[0] < 0 or box[1] < 0 or box[2] > resolution or box[3] > resolution:
                     continue
@@ -2725,11 +2772,42 @@ def verify_tile_object(object_name, view="auto", tolerance=12.0, evidence_dir=No
         "render_path": render_path,
     }
 
-_CHECKPOINTS = {}
-_CHECKPOINT_IDS = itertools.count(1)
+# A reload re-executes this module in its existing namespace, so these keep their value across
+# ``reload_core``: the registry is plain data plus references to the hidden meshes, which survive too.
+_CHECKPOINTS = globals().get("_CHECKPOINTS", {})
+_CHECKPOINT_IDS = globals().get("_CHECKPOINT_IDS", itertools.count(1))
 
 
-def _checkpoint_entry(checkpoint_id):
+def _mesh_alive(mesh):
+    """False once Blender freed the datablock (deleted by hand, or the file was reloaded)."""
+    try:
+        mesh.name
+    except ReferenceError:
+        return False
+    return True
+
+
+def _drop_checkpoint(checkpoint_id):
+    """Forget a checkpoint and remove the hidden meshes of it that still exist; returns its object names."""
+    entry = _CHECKPOINTS.pop(checkpoint_id)
+    for saved in entry["objects"].values():
+        if _mesh_alive(saved["mesh"]):
+            bpy.data.meshes.remove(saved["mesh"])
+    return list(entry["objects"])
+
+
+def _checkpoint_lost_objects(entry):
+    """Names of the objects of a checkpoint whose saved mesh copy no longer exists."""
+    return [name for name, saved in entry["objects"].items() if not _mesh_alive(saved["mesh"])]
+
+
+def _prune_lost_checkpoints():
+    """Drop every checkpoint that lost a mesh copy, so listings only show checkpoints that can be restored."""
+    for checkpoint_id in [i for i, entry in _CHECKPOINTS.items() if _checkpoint_lost_objects(entry)]:
+        _drop_checkpoint(checkpoint_id)
+
+
+def _checkpoint_entry(checkpoint_id, restorable=True):
     if isinstance(checkpoint_id, bool) or not isinstance(checkpoint_id, numbers.Integral):
         raise ValueError(f"checkpoint_id must be an integer, got {checkpoint_id!r}")
     entry = _CHECKPOINTS.get(int(checkpoint_id))
@@ -2737,6 +2815,13 @@ def _checkpoint_entry(checkpoint_id):
         raise ValueError(
             f"No checkpoint {checkpoint_id}; existing checkpoint ids: {sorted(_CHECKPOINTS)} "
             "(call checkpoint first)"
+        )
+    lost = _checkpoint_lost_objects(entry)
+    if lost and restorable:
+        _drop_checkpoint(int(checkpoint_id))
+        raise ValueError(
+            f"checkpoint {checkpoint_id}: the saved mesh of {lost} no longer exists (deleted, or the file was "
+            f"reloaded); the checkpoint was dropped and nothing was restored; call checkpoint again"
         )
     return entry
 
@@ -2764,8 +2849,9 @@ def checkpoint(object_names=None, label=""):
     """Snapshot tile objects so :func:`rollback` can restore them.
 
     ``object_names=None`` snapshots every tile object of :func:`describe_scene`. Each object's mesh is
-    copied into a hidden fake-user mesh ``.spyrite_ckpt_<id>_<object>``; the grid id, pixels per unit,
-    material slots and world matrix are recorded. Checkpoints are session state (see the module docstring).
+    copied into a hidden fake-user mesh ``.spyrite_ckpt_<id>_<object>`` (the copy carries the material
+    slots); the grid id, pixels per unit, local transform and parent are recorded. A name listed twice is
+    snapshotted once. Checkpoints are session state (see the module docstring).
     Returns ``{checkpoint_id, objects: [names]}``.
     """
     if not isinstance(label, str):
@@ -2774,7 +2860,7 @@ def checkpoint(object_names=None, label=""):
         object_names = [o["object_name"] for o in describe_scene()["tile_objects"]]
     elif isinstance(object_names, str) or not isinstance(object_names, (list, tuple)):
         raise ValueError(f"object_names (op: objects) must be a list of object names or None, got {object_names!r}")
-    object_names = list(object_names)
+    object_names = list(dict.fromkeys(object_names))
     if not object_names:
         raise ValueError("No objects to checkpoint: the scene has no tile objects; call create_tile_object first")
     objects = [_mesh_object(name) for name in object_names]
@@ -2791,8 +2877,13 @@ def checkpoint(object_names=None, label=""):
                     "mesh": mesh_copy,
                     "gridid": int(obj.sprytile_gridid),
                     "pixels_per_unit": obj.get(PIXELS_PER_UNIT_PROP),
-                    "materials": [slot.material.name if slot.material else None for slot in obj.material_slots],
-                    "matrix_world": obj.matrix_world.copy(),
+                    # local transform and parenting, not matrix_world: restoring a child's world matrix
+                    # against a parent that has not been restored yet would bake the parent's move into it
+                    "matrix_basis": obj.matrix_basis.copy(),
+                    "parent": obj.parent.name if obj.parent else None,
+                    "parent_type": obj.parent_type,
+                    "parent_bone": obj.parent_bone,
+                    "matrix_parent_inverse": obj.matrix_parent_inverse.copy(),
                 }
     except BaseException:
         for entry in recorded.values():
@@ -2807,16 +2898,25 @@ def checkpoint(object_names=None, label=""):
 
 
 def rollback(checkpoint_id):
-    """Restore every object of a checkpoint to its mesh, grid, pixels per unit, materials and matrix.
+    """Restore every object of a checkpoint to its mesh, grid, pixels per unit, materials, parent and transform.
 
-    All objects must still exist, else nothing is restored. The checkpoint stays valid, so it can be rolled
-    back to again. Returns ``{checkpoint_id, restored: [names]}``.
+    All objects (and the parents they had) must still exist and every saved mesh copy must be intact, else
+    nothing is restored; a checkpoint whose mesh copy is gone is dropped. The checkpoint stays valid, so it
+    can be rolled back to again. Returns ``{checkpoint_id, restored: [names]}``.
     """
     entry = _checkpoint_entry(checkpoint_id)
     checkpoint_id = int(checkpoint_id)
     missing = [name for name in entry["objects"] if bpy.data.objects.get(name) is None]
     if missing:
         raise ValueError(f"checkpoint {checkpoint_id}: objects missing: {missing}; nothing was restored")
+    parentless = {
+        name: saved["parent"] for name, saved in entry["objects"].items()
+        if saved["parent"] is not None and bpy.data.objects.get(saved["parent"]) is None
+    }
+    if parentless:
+        raise ValueError(
+            f"checkpoint {checkpoint_id}: parents missing: {parentless} (object: parent); nothing was restored"
+        )
     with _objects_in_object_mode():
         for name, saved in entry["objects"].items():
             obj = bpy.data.objects[name]
@@ -2832,28 +2932,29 @@ def rollback(checkpoint_id):
                 obj.pop(PIXELS_PER_UNIT_PROP, None)
             else:
                 obj[PIXELS_PER_UNIT_PROP] = saved["pixels_per_unit"]
-            current = [slot.material.name if slot.material else None for slot in obj.material_slots]
-            if current != saved["materials"]:
-                restored.materials.clear()
-                for material_name in saved["materials"]:
-                    restored.materials.append(bpy.data.materials.get(material_name) if material_name else None)
-            obj.matrix_world = saved["matrix_world"].copy()
+            obj.parent = bpy.data.objects[saved["parent"]] if saved["parent"] else None
+            if saved["parent"]:
+                obj.parent_type = saved["parent_type"]
+                obj.parent_bone = saved["parent_bone"]
+            obj.matrix_parent_inverse = saved["matrix_parent_inverse"].copy()
+            obj.matrix_basis = saved["matrix_basis"].copy()
     return {"checkpoint_id": checkpoint_id, "restored": list(entry["objects"])}
 
 
 def discard_checkpoint(checkpoint_id):
     """Forget a checkpoint and remove its hidden mesh copies. Returns ``{checkpoint_id, discarded: [names]}``."""
-    entry = _checkpoint_entry(checkpoint_id)
+    _checkpoint_entry(checkpoint_id, restorable=False)
     checkpoint_id = int(checkpoint_id)
-    for saved in entry["objects"].values():
-        if saved["mesh"].name in bpy.data.meshes:
-            bpy.data.meshes.remove(saved["mesh"])
-    del _CHECKPOINTS[checkpoint_id]
-    return {"checkpoint_id": checkpoint_id, "discarded": list(entry["objects"])}
+    return {"checkpoint_id": checkpoint_id, "discarded": _drop_checkpoint(checkpoint_id)}
 
 
 def list_checkpoints():
-    """Read-only: ``[{checkpoint_id, label, created (ISO-8601 UTC), objects}]``, oldest first."""
+    """Read-only: ``[{checkpoint_id, label, created (ISO-8601 UTC), objects}]``, oldest first.
+
+    Checkpoints that lost a mesh copy (deleted by hand, or the file was reloaded) are dropped first, along
+    with their remaining copies, so every listed checkpoint can be rolled back to.
+    """
+    _prune_lost_checkpoints()
     return [
         {
             "checkpoint_id": checkpoint_id,

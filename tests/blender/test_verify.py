@@ -33,6 +33,8 @@ def _remove_test_data():
         bpy.data.objects.remove(obj, do_unlink=True)
     for mesh in [m for m in bpy.data.meshes if m.name.startswith(PREFIX)]:
         bpy.data.meshes.remove(mesh)
+    for collection in [c for c in bpy.data.collections if c.name.startswith(PREFIX)]:
+        bpy.data.collections.remove(collection)
     for material in [m for m in bpy.data.materials if m.name.startswith(PREFIX)]:
         bpy.data.materials.remove(material)
     sprytile_core.validate_grids(bpy.context.scene)
@@ -75,11 +77,19 @@ def _scene_state():
         "resolution": (render.resolution_x, render.resolution_y, render.resolution_percentage),
         "filepath": render.filepath,
         "use_file_extension": render.use_file_extension,
+        "media_type": render.image_settings.media_type,
         "file_format": render.image_settings.file_format,
+        "color_management": render.image_settings.color_management,
+        "render_flags": (
+            render.use_stamp, render.use_border, render.use_crop_to_border, render.use_compositing,
+            render.use_sequencer, render.film_transparent, render.dither_intensity,
+        ),
         "shading": (scene.display.shading.color_type, scene.display.shading.light),
         "render_aa": scene.display.render_aa,
         "view_transform": scene.view_settings.view_transform,
         "look": scene.view_settings.look,
+        "curve_mapping": scene.view_settings.use_curve_mapping,
+        "display_device": scene.display_settings.display_device,
         "hide_render": sorted((o.name, o.hide_render) for o in bpy.data.objects),
         "objects": sorted(o.name for o in bpy.data.objects),
         "cameras": sorted(c.name for c in bpy.data.cameras),
@@ -179,6 +189,139 @@ def test_a_face_whose_uvs_show_another_tile_is_a_mismatch(tmp_path):
     assert lenient["ok"] is True and lenient["mismatches"] == []
 
 
+def _set_face_layer(object_name, face_index, layer_name, value):
+    obj = bpy.data.objects[object_name]
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.faces.ensure_lookup_table()
+    mesh.faces[face_index][mesh.faces.layers.int[layer_name]] = value
+    mesh.to_mesh(obj.data)
+    mesh.free()
+
+
+def test_a_face_with_the_right_tile_but_the_wrong_orientation_is_a_mismatch(tmp_path):
+    _board(ORIENTED_IMAGE, orientations=True)
+    victim = next(f for f in _tile_state(OBJECT)["faces"] if f["cell_xy"] == [1, 0])
+    assert (victim["rotation_deg"], victim["flip_x"], victim["flip_y"]) == (90, False, False)
+    obj = bpy.data.objects[OBJECT]
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    mesh.faces.ensure_lookup_table()
+    settings = mesh.faces[victim["index"]][mesh.faces.layers.int["paint_settings"]]
+    mesh.free()
+    # the data now says "not turned" while the UVs still show the turned tile
+    _set_face_layer(OBJECT, victim["index"], "paint_settings", settings & ~(3 << 10))
+    stale = _tile_state(OBJECT)["faces"][victim["index"]]
+    assert (stale["tile_xy"], stale["rotation_deg"]) == (victim["tile_xy"], 0)
+
+    report = api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
+    assert report["ok"] is False and report["measured"] == 16
+    assert [m["index"] for m in report["mismatches"]] == [victim["index"]]
+
+
+def test_a_scene_that_outputs_video_still_verifies_and_keeps_its_output_settings(tmp_path):
+    _board(COLOR_IMAGE)
+    image_settings = bpy.context.scene.render.image_settings
+    image_settings.media_type = "VIDEO"
+    image_settings.file_format = "FFMPEG"
+    try:
+        before = _scene_state()
+        report = api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
+        assert (report["ok"], report["measured"]) == (True, 16)
+        assert _scene_state() == before
+        assert (image_settings.media_type, image_settings.file_format) == ("VIDEO", "FFMPEG")
+    finally:
+        image_settings.media_type = "IMAGE"
+        image_settings.file_format = "PNG"
+
+
+def _stamp(scene):
+    scene.render.use_stamp = True
+
+
+def _border(scene):
+    scene.render.use_border = True
+    scene.render.border_min_x = scene.render.border_min_y = 0.25
+    scene.render.border_max_x = scene.render.border_max_y = 0.75
+
+
+def _border_cropped(scene):
+    _border(scene)
+    scene.render.use_crop_to_border = True
+
+
+def _output_colour_override(scene):
+    scene.render.image_settings.color_management = "OVERRIDE"
+    scene.render.image_settings.view_settings.view_transform = "AgX"
+
+
+def _curve_mapping(scene):
+    scene.view_settings.use_curve_mapping = True
+
+
+def _dither(scene):
+    scene.render.dither_intensity = 2.0
+
+
+def _film_transparent(scene):
+    scene.render.film_transparent = True
+
+
+def _compositing_and_sequencer(scene):
+    scene.render.use_compositing = scene.render.use_sequencer = True
+
+
+@pytest.mark.parametrize(
+    "perturb",
+    [_stamp, _border, _border_cropped, _output_colour_override, _curve_mapping, _dither, _film_transparent,
+     _compositing_and_sequencer],
+)
+def test_user_render_settings_that_alter_the_image_do_not_fail_a_correct_board(tmp_path, perturb):
+    _board(COLOR_IMAGE)
+    perturb(bpy.context.scene)
+    try:
+        before = _scene_state()
+        report = api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
+        assert (report["ok"], report["measured"], report["mismatches"]) == (True, 16, [])
+        assert _scene_state() == before
+    finally:
+        render = bpy.context.scene.render
+        render.use_stamp = render.use_border = render.use_crop_to_border = False
+        render.film_transparent = render.use_compositing = render.use_sequencer = False
+        render.dither_intensity = 1.0
+        render.image_settings.color_management = "FOLLOW_SCENE"
+        bpy.context.scene.view_settings.use_curve_mapping = False
+
+
+def test_a_face_facing_away_from_the_camera_still_hides_the_faces_behind_it(tmp_path):
+    obj = _board(COLOR_IMAGE)
+    mesh = bmesh.new()
+    mesh.from_mesh(obj.data)
+    # a 2 m x 2 m quad above cells (0..1, 0..1), wound so its normal points down, away from the top camera
+    corners = ((0.0, 0.0, 0.5), (0.0, 2.0, 0.5), (2.0, 2.0, 0.5), (2.0, 0.0, 0.5))
+    mesh.faces.new([mesh.verts.new(c) for c in corners])
+    mesh.to_mesh(obj.data)
+    mesh.free()
+    report = api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
+    assert (report["ok"], report["measured"], report["mismatches"]) == (True, 12, [])
+
+
+def test_a_target_in_a_collection_hidden_from_render_is_refused_naming_it(tmp_path):
+    obj = _board(COLOR_IMAGE)
+    hidden = bpy.data.collections.new(PREFIX + "hidden")
+    bpy.context.scene.collection.children.link(hidden)
+    hidden.objects.link(obj)
+    bpy.context.scene.collection.objects.unlink(obj)
+    hidden.hide_render = True
+    before = _scene_state()
+    with pytest.raises(ValueError, match=f"Object '{OBJECT}' is not rendered: collection '{hidden.name}' has hide_render set"):
+        api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
+    assert _scene_state() == before
+    # linked into a second, rendered collection it renders again
+    bpy.context.scene.collection.objects.link(obj)
+    assert api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))["ok"] is True
+
+
 def test_a_decal_hides_its_base_and_is_judged_instead(tmp_path):
     _board(COLOR_IMAGE)
     api.place_tiles(OBJECT, TILESET, [{"cell_xy": [0, 0], "tile_xy": [3, 3], "layer": "DECAL"}])
@@ -214,7 +357,7 @@ def test_other_objects_do_not_cover_the_object(tmp_path):
     _board(COLOR_IMAGE)
     bpy.ops.mesh.primitive_plane_add(size=40.0, location=(2.0, 2.0, 0.5))
     cover = bpy.context.active_object
-    cover.name = PREFIX + "cover"
+    cover.name = cover.data.name = PREFIX + "cover"
     bpy.context.view_layer.objects.active = bpy.data.objects[OBJECT]
     report = api.verify_tile_object(OBJECT, view="top", evidence_dir=str(tmp_path))
     assert (report["ok"], report["measured"]) == (True, 16)

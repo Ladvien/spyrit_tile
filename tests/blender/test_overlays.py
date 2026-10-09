@@ -125,15 +125,15 @@ def test_fill_pattern_on_overlay_lands_lifted(pair):
     assert {f["plane_offset_m"] for f in api.describe_tile_object(OVERLAY)["faces"]} == {0.002}
 
 
-def test_verify_base_passes_with_overlay_present_and_hidden(pair):
+def test_verify_base_passes_with_overlay_present_and_hidden(pair, tmp_path):
     api.fill_tiles(BASE, TILESET, (0, 0), (3, 3), (0, 0))
     api.fill_tiles(OVERLAY, TILESET, (0, 0), (3, 3), (1, 0))
     overlay = bpy.data.objects[OVERLAY]
     for hidden in (False, True):
         overlay.hide_render = hidden
         overlay.hide_viewport = hidden
-        result = api.verify_tile_object(BASE, view="top")
+        result = api.verify_tile_object(BASE, view="top", evidence_dir=str(tmp_path / f"base_{hidden}"))
         assert result["ok"] is True and result["measured"] == 16, result
     # the overlay itself verifies too: it is its own tile object, lifted 2 mm off the base
     overlay.hide_render = overlay.hide_viewport = False
-    assert api.verify_tile_object(OVERLAY, view="top")["ok"] is True
+    assert api.verify_tile_object(OVERLAY, view="top", evidence_dir=str(tmp_path / "overlay"))["ok"] is True

@@ -482,18 +482,21 @@ def test_checkpoint_ops_match_api(tileset):
     made = ops.checkpoint([OPS_OBJECT_NAME], label="ops")
     api_made = _api().checkpoint([API_OBJECT_NAME], label="api")
     assert made.objects == (OPS_OBJECT_NAME,) and api_made["objects"] == [API_OBJECT_NAME]
+    assert isinstance(made.checkpoint_id, str)  # the id the tool reports is the one rollback takes
     listing = ops.list_checkpoints()
     api_listing = _api().list_checkpoints()
     assert [(c.checkpoint_id, c.label, c.objects) for c in listing.checkpoints] == [
-        (c["checkpoint_id"], c["label"], tuple(c["objects"])) for c in api_listing
+        (str(c["checkpoint_id"]), c["label"], tuple(c["objects"])) for c in api_listing
     ]
     ops.remove_tiles(OPS_OBJECT_NAME, [(0, 0), (1, 1)])
     assert ops.tile_object_report(OPS_OBJECT_NAME).face_count == 2
-    restored = ops.rollback(str(made.checkpoint_id))
+    restored = ops.rollback(made.checkpoint_id)
     api_restored = _api().rollback(api_made["checkpoint_id"])
     assert restored.restored == (OPS_OBJECT_NAME,) and api_restored["restored"] == [API_OBJECT_NAME]
+    assert restored.checkpoint_id == made.checkpoint_id
     assert ops.tile_object_report(OPS_OBJECT_NAME).face_count == 4
-    assert ops.discard_checkpoint(str(made.checkpoint_id)).discarded == (OPS_OBJECT_NAME,)
+    discarded = ops.discard_checkpoint(made.checkpoint_id)
+    assert discarded.discarded == (OPS_OBJECT_NAME,) and discarded.checkpoint_id == made.checkpoint_id
     _api().discard_checkpoint(api_made["checkpoint_id"])
     assert ops.list_checkpoints().checkpoints == ()
 
