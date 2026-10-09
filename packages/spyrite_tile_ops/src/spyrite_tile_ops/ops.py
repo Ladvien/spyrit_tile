@@ -547,13 +547,13 @@ def build_spec(spec_path: Path) -> SpecBuildReport:
 
 
 @op(reads_only=True)
-def export_spec(object_names: list[str], spec_path: Path) -> SpecExportReport:
-    """Write tile objects as a YAML spec at an absolute path that build_spec rebuilds.
+def export_spec(objects: list[str], spec_path: Path) -> SpecExportReport:
+    """Write the tile objects named in `objects` as a YAML spec at an absolute path that build_spec rebuilds.
 
     One `tiles` entry per whole-cell face; faces that placements cannot rebuild (hand modelled, backwards,
     untextured) are left out and listed in `unexported_faces`. Writes a file; the scene is not changed.
     """
-    result = _addon_api().export_spec(object_names=list(object_names), spec_path=str(spec_path))
+    result = _addon_api().export_spec(object_names=list(objects), spec_path=str(spec_path))
     return SpecExportReport(
         spec_path=result["spec_path"],
         objects=int(result["objects"]),

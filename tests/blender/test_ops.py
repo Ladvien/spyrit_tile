@@ -386,7 +386,7 @@ def test_build_spec_and_export_spec_match_api(tmp_path):
         assert _geometry(OPS_OBJECT_NAME) == _geometry(API_OBJECT_NAME)
 
         out = tmp_path / "exported.spyrite.yaml"
-        exported = ops.export_spec(object_names=[OPS_OBJECT_NAME], spec_path=out)
+        exported = ops.export_spec(objects=[OPS_OBJECT_NAME], spec_path=out)
         api_exported = _api().export_spec([API_OBJECT_NAME], str(tmp_path / "api_exported.spyrite.yaml"))
         assert exported == ops.SpecExportReport(str(out), objects=1, tiles=7, unexported_faces={})
         assert (exported.objects, exported.tiles) == (api_exported["objects"], api_exported["tiles"])
