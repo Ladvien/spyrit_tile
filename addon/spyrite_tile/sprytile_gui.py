@@ -226,6 +226,27 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
     # Whether the palette has been anchored to its corner in this session
     anchored_this_session = False
 
+    # macOS delivers Magic Mouse / trackpad scrolling as TRACKPADPAN and a pinch
+    # as TRACKPADZOOM instead of WHEELUPMOUSE/WHEELDOWNMOUSE. Their amount is
+    # the move from event.mouse_prev_x/y to event.mouse_x/y, in pixels for a
+    # scroll. Events are small and frequent, so they accumulate until a whole
+    # zoom step (or grid cycle) is reached.
+    trackpad_pan_step = 30.0
+    trackpad_zoom_step = 10.0
+    trackpad_accum = 0.0
+
+    @staticmethod
+    def accumulate_trackpad(accum, delta, step_size):
+        """Add delta to accum, return (whole steps, remaining accum), steps toward zero.
+
+        A change of direction drops what was left of the opposite direction.
+        """
+        if accum * delta < 0:
+            accum = 0.0
+        accum += delta
+        steps = int(accum / step_size)
+        return steps, accum - steps * step_size
+
     build_previews = {
         'MAKE_FACE' : ToolBuild,
         'PAINT' : ToolPaint,
@@ -701,6 +722,16 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         if mouse_pt is not None and context.scene.sprytile_ui.middle_btn and VIEW3D_OP_SprytileGui.is_moving:
            context.scene.sprytile_ui.use_mouse = True 
 
+        if event.type in {'TRACKPADPAN', 'TRACKPADZOOM'}:
+            # use_mouse is only refreshed by MOUSEMOVE, a trackpad gesture is
+            # judged by where the pointer is now so it can never be swallowed
+            # when the pointer is outside the palette (it then navigates the 3D view)
+            gesture_pt = Vector((event.mouse_region_x, event.mouse_region_y))
+            over_gui = gui_min.x <= gesture_pt.x <= gui_max.x and gui_min.y <= gesture_pt.y <= gui_max.y
+            context.scene.sprytile_ui.use_mouse = over_gui
+            if not over_gui:
+                VIEW3D_OP_SprytileGui.trackpad_accum = 0.0
+
         if context.scene.sprytile_ui.use_mouse is False:
             ret_val = 'PASS_THROUGH'
             return ret_val
@@ -713,6 +744,25 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
                 direction = 1 if 'DOWN' in event.type else -1
                 bpy.ops.sprytile.grid_cycle('INVOKE_REGION_WIN', direction=direction)
                 self.label_counter = VIEW3D_OP_SprytileGui.label_frames
+
+        if event.type in {'TRACKPADPAN', 'TRACKPADZOOM'}:
+            delta_x = event.mouse_x - event.mouse_prev_x
+            delta_y = event.mouse_y - event.mouse_prev_y
+            if event.type == 'TRACKPADPAN':
+                # Scrolling up zooms in and ctrl+scroll cycles grids, as the wheel does
+                steps, VIEW3D_OP_SprytileGui.trackpad_accum = self.accumulate_trackpad(
+                    VIEW3D_OP_SprytileGui.trackpad_accum, delta_y, self.trackpad_pan_step)
+            else:
+                # Pinching outwards zooms in
+                steps, VIEW3D_OP_SprytileGui.trackpad_accum = self.accumulate_trackpad(
+                    VIEW3D_OP_SprytileGui.trackpad_accum, delta_x + delta_y, self.trackpad_zoom_step)
+            if steps != 0:
+                if event.ctrl is False:
+                    self.set_zoom_level(context, steps)
+                elif event.type == 'TRACKPADPAN':
+                    for _ in range(abs(steps)):
+                        bpy.ops.sprytile.grid_cycle('INVOKE_REGION_WIN', direction=-1 if steps > 0 else 1)
+                    self.label_counter = VIEW3D_OP_SprytileGui.label_frames
 
         if mouse_pt is not None and event.type in {'LEFTMOUSE', 'MIDDLEMOUSE', 'MOUSEMOVE', 'INBETWEEN_MOUSEMOVE'}:
             click_pos = Vector((mouse_pt.x - gui_min.x, mouse_pt.y - gui_min.y))
