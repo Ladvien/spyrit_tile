@@ -2,7 +2,8 @@
 
 The same path an agent uses: MCP client -> blender-mcp (stdio) -> the `mcp` add-on's
 socket in your running Blender -> blended's dispatch -> spyrite_tile_ops -> the add-on API.
-It builds `spyrite_smoke_room` (a 6x6 floor and a 6x3 wall from the 16 px fixture), turns on
+It builds `spyrite_smoke_room` (a 6x6 floor and a 6x3 wall from the 16 px fixture) and
+`spyrite_probe_board` (4x4 cells left of the room, every tile once, for `visual_probe.py`), turns on
 texture shading, frames it, saves a window screenshot and asserts the face count and tiles.
 
 Needs: Blender open with the `mcp` add-on server running (blended's `make install-mcp-addon`)
@@ -27,6 +28,7 @@ BLENDED_MCP = "/Users/ladvien/blended/.venv/bin/blender-mcp"
 FIXTURE = REPOSITORY / "tests" / "fixtures" / "tiles_16px.png"
 OUTPUT = REPOSITORY / "outputs" / "live_smoke"
 ROOM = "spyrite_smoke_room"
+BOARD = "spyrite_probe_board"  # 4x4 cells, each a different tile: what scripts/visual_probe.py needs
 TILESET = "spyrite_smoke_tiles"
 FLOOR_CELLS = 6 * 6
 WALL_CELLS = 6 * 3
@@ -34,11 +36,12 @@ FLOOR_TILE = [1, 1]
 WALL_TILE = [2, 0]
 
 REMOVE_ROOM = f"""import bpy
-o = bpy.data.objects.get({ROOM!r})
-if o is not None:
-    if bpy.context.object is o and o.mode != 'OBJECT':
-        bpy.ops.object.mode_set(mode='OBJECT')
-    bpy.data.objects.remove(o)
+if bpy.context.object is not None and bpy.context.object.mode != 'OBJECT':
+    bpy.ops.object.mode_set(mode='OBJECT')
+for name in ({ROOM!r}, {BOARD!r}):
+    o = bpy.data.objects.get(name)
+    if o is not None:
+        bpy.data.objects.remove(o)
 """
 RELOAD_API = """import importlib, sys
 importlib.reload(sys.modules['bl_ext.user_default.spyrite_tile.api'])
@@ -111,6 +114,12 @@ async def main(reload_api: bool) -> None:
             await _call(session, "fill_tiles", {
                 "object_name": ROOM, "tileset_name": TILESET, "cell_min_xy": [0, 0],
                 "cell_max_xy": [5, 2], "tile_xy": WALL_TILE, "plane": "XZ", "plan_step": 4})
+            await _call(session, "create_tile_object", {
+                "name": BOARD, "tileset_name": TILESET, "plan_step": 3})
+            await _call(session, "place_tiles", {
+                "object_name": BOARD, "tileset_name": TILESET, "plan_step": 4,
+                "placements": [{"cell_xy": [x - 6, y], "tile_xy": [x, 3 - y]}
+                               for x in range(4) for y in range(4)]})
             view = _returned((await _call(session, "set_pixel_art_view", {"plan_step": 5}))[1])
             if view["viewports_textured"] < 1:
                 raise SmokeFailure(f"no open Solid viewport was switched to textures: {view}")

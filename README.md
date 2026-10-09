@@ -63,6 +63,12 @@ Tests: `make test-pure` (generation package), `make blender-test-deps && make te
 `make test-live` drives the Blender you have open through blended's MCP server (the agent's own path),
 builds `spyrite_smoke_room`, asserts its faces and tiles and saves a window screenshot to
 `outputs/live_smoke/`; `ARGS=--reload-api` picks up `api.py` edits without a restart.
+`make test-visual` (after `make test-live`) is a pixel oracle: it isolates a tile object, looks at it
+orthographically, screenshots the viewport and checks every visible face's colour against its tile in
+the tileset image (`scripts/visual_probe.py`; evidence in `outputs/visual_probe/`).
+`tests/blender/test_metamorphic.py` checks relations between runs (translation, scale, plane swap,
+rotation vs flips, order and history independence, fill vs place, remove vs place, atlas permutation,
+save/load) instead of hand-computed values.
 
 ### Getting Started:
 
