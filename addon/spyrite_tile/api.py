@@ -102,12 +102,19 @@ Tile names
 Pattern fills
     :func:`fill_pattern` fills a rectangle or an explicit cell list with a ``random`` (seeded), ``stamp``
     or ``autotile`` (``edges4``, keys ``"0".."15"``) pattern through one :func:`place_tiles` call.
+
+Composite builders
+    :func:`build_room` places a floor, a "back" (XZ) and a "left" (YZ) wall and an optional ceiling in one
+    call; :func:`extrude_edge` raises a wall along a run of floor cells (sides N and W). Only walls whose
+    normal faces the room are expressible with the fixed plane normals (XZ faces -Y, YZ faces +X), so build
+    rooms whose open sides face -Y and +X. :func:`move_faces` shifts faces by whole pixels and rebuilds
+    their UVs from the tile data stored on them.
 """
 
 import math
 import numbers
 import os
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 
 import bmesh
 import bpy
@@ -126,6 +133,9 @@ __all__ = [
     "fill_tiles",
     "remove_tiles",
     "paint_faces",
+    "build_room",
+    "extrude_edge",
+    "move_faces",
     "describe_tile_object",
     "describe_scene",
     "set_pixel_art_view",
@@ -675,7 +685,7 @@ def _normalize_placement(index, placement, tileset):
     return normalized
 
 
-def _apply_placements(obj, tileset, placements, clear=False):
+def _apply_placements(obj, tileset, placements, clear=False, outcomes=None):
     scene = bpy.context.scene
     ppu = _object_pixels_per_unit(obj, scene)
     grid = tileset.grid
@@ -747,6 +757,8 @@ def _apply_placements(obj, tileset, placements, clear=False):
                         else "an existing face in that cell is not coplanar with the plane"
                     )
                 )
+            if outcomes is not None:
+                outcomes.append(faces_after > faces_before)
             if faces_after > faces_before:
                 built += 1
             else:
@@ -1131,6 +1143,350 @@ def paint_faces(object_name, material_name, face_indices, tile_xy, rotation_deg=
             if painted_index is None:
                 raise RuntimeError(f"Could not paint face {index}; is it hidden?")
     return {"painted": len(indices), "face_count": face_count}
+
+
+# ---------------------------------------------------------------------------
+# Composite builders
+# ---------------------------------------------------------------------------
+
+ROOM_WALLS = ("back", "left")
+_ROOM_WALL_PLANE = {"back": "XZ", "left": "YZ"}
+_ROOM_WALLS_ERROR = (
+    "walls may contain only 'back' and 'left': planes XZ (normal -Y) and YZ (normal +X) are the only wall "
+    "planes; build the room so its open sides face -Y and +X"
+)
+_EXTRUDE_SIDES = ("N", "S", "E", "W")
+_WHOLE_CELL_TOLERANCE = 1e-6
+
+
+def _cell_size_m(obj, tileset):
+    """(width, height) in metres of one cell of the tileset on this object."""
+    ppu = _object_pixels_per_unit(obj, bpy.context.scene)
+    return tileset.grid.grid[0] / ppu, tileset.grid.grid[1] / ppu
+
+
+def _whole_cells(label, value_m, cell_m):
+    """``value_m`` as a whole number of cells of ``cell_m`` metres, or a ValueError naming the fix."""
+    cells = value_m / cell_m
+    whole = round(cells)
+    if abs(cells - whole) > _WHOLE_CELL_TOLERANCE:
+        raise ValueError(
+            f"{label} {value_m} m is not a whole number of cells ({cell_m} m each); walls start on a cell "
+            f"row, so use a multiple of {cell_m}"
+        )
+    return whole
+
+
+def _require_square_cells(label, obj, tileset):
+    cell_w, cell_h = _cell_size_m(obj, tileset)
+    if abs(cell_w - cell_h) > PLANE_TOLERANCE_M:
+        raise ValueError(
+            f"{label} needs square tiles: on the YZ plane cells are {cell_w} m wide but floor rows are "
+            f"{cell_h} m deep, so the wall would not meet the floor; use a tileset with square tiles"
+        )
+
+
+def _placement_parts(obj, tileset, parts):
+    """Apply ``parts`` = [(key, [placement dict, ...]), ...] as one rolled-back-on-failure call.
+
+    Returns ``({key: {built, remapped, face_count}}, face_count)``.
+    """
+    flat = [placement for _, placements in parts for placement in placements]
+    normalized = [_normalize_placement(i, p, tileset) for i, p in enumerate(flat)]
+    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+    outcomes = []
+    total = _apply_placements(obj, tileset, normalized, outcomes=outcomes)
+    reports = {}
+    start = 0
+    for key, placements in parts:
+        built = sum(outcomes[start : start + len(placements)])
+        reports[key] = {
+            "built": built,
+            "remapped": len(placements) - built,
+            "face_count": total["face_count"],
+        }
+        start += len(placements)
+    return reports, total["face_count"]
+
+
+def build_room(
+    object_name,
+    material_name,
+    size_cells,
+    floor_tile,
+    wall_tile,
+    walls=ROOM_WALLS,
+    origin_cell=(0, 0),
+    floor_offset_m=0.0,
+    ceiling_tile=None,
+):
+    """Build a floor, up to two walls and an optional ceiling in one call.
+
+    ``size_cells`` is ``(width, depth, height)`` in cells (x, y, z); ``origin_cell`` the floor's minimum cell
+    ``(ox, oy)``. The floor is the XY rectangle ``[ox, oy]..[ox+width-1, oy+depth-1]`` at ``floor_offset_m``.
+    ``"back"`` is the XZ wall at ``y = (oy + depth) * cell_height`` (its -Y normal faces the viewer) over
+    x cells ``ox..ox+width-1``; ``"left"`` is the YZ wall at ``x = ox * cell_width`` (normal +X) over y cells
+    ``oy..oy+depth-1``. Both span z rows from ``floor_offset_m / cell_height`` (must be a whole number)
+    for ``height`` rows. ``ceiling_tile`` adds an XY layer at ``floor_offset_m + height * cell_height``.
+    Only those two walls exist because the planes have fixed normals: build the room so its open sides face
+    -Y and +X. A ``"left"`` wall needs square tiles. Tiles are ``[column, row]`` or names; ``wall_tile``
+    is checked against the XZ and YZ plane rules of each wall built.
+    Everything is placed in one call, so a failure rolls the whole room back.
+    Returns ``{floor, walls: {name: part}, ceiling: part | None, face_count}`` where a part is
+    ``{built, remapped, face_count}`` as for :func:`place_tiles`.
+    """
+    obj = _mesh_object(object_name)
+    tileset = _find_tileset(material_name)
+    width, depth, height = _as_int_tuple("size_cells", size_cells, 3, minimum=1)
+    ox, oy = _as_int_tuple("origin_cell", origin_cell, 2)
+    floor_offset = _as_float("floor_offset_m", floor_offset_m)
+    if isinstance(walls, str):
+        walls = (walls,)
+    try:
+        wall_names = list(walls)
+    except TypeError:
+        raise ValueError(_ROOM_WALLS_ERROR) from None
+    if any(name not in ROOM_WALLS for name in wall_names):
+        raise ValueError(_ROOM_WALLS_ERROR)
+    wall_names = [name for name in ROOM_WALLS if name in wall_names]
+
+    floor = _as_tile(tileset, "floor_tile", floor_tile, "XY")
+    wall_tiles = {name: _as_tile(tileset, "wall_tile", wall_tile, _ROOM_WALL_PLANE[name]) for name in wall_names}
+    if not wall_names:
+        _as_tile(tileset, "wall_tile", wall_tile)
+    ceiling = None if ceiling_tile is None else _as_tile(tileset, "ceiling_tile", ceiling_tile, "XY")
+    cell_w, cell_h = _cell_size_m(obj, tileset)
+    base_row = _whole_cells("floor_offset_m", floor_offset, cell_h) if wall_names else 0
+    if "left" in wall_names:
+        _require_square_cells("A 'left' wall", obj, tileset)
+
+    def layer(plane, offset, cells, tile):
+        return [
+            {"cell_xy": cell, "tile_xy": tile, "plane": plane, "plane_offset_m": offset}
+            for cell in cells
+        ]
+
+    floor_cells = [(x, y) for y in range(oy, oy + depth) for x in range(ox, ox + width)]
+    parts = [("floor", layer("XY", floor_offset, floor_cells, floor))]
+    for name in wall_names:
+        rows = range(base_row, base_row + height)
+        if name == "back":
+            cells = [(x, z) for z in rows for x in range(ox, ox + width)]
+            offset = (oy + depth) * cell_h
+        else:
+            cells = [(y, z) for z in rows for y in range(oy, oy + depth)]
+            offset = ox * cell_w
+        parts.append((name, layer(_ROOM_WALL_PLANE[name], offset, cells, wall_tiles[name])))
+    if ceiling is not None:
+        parts.append(("ceiling", layer("XY", floor_offset + height * cell_h, floor_cells, ceiling)))
+
+    reports, face_count = _placement_parts(obj, tileset, parts)
+    return {
+        "floor": reports["floor"],
+        "walls": {name: reports[name] for name in wall_names},
+        "ceiling": reports.get("ceiling"),
+        "face_count": face_count,
+    }
+
+
+def extrude_edge(
+    object_name,
+    material_name,
+    plane,
+    plane_offset_m,
+    from_cell,
+    to_cell,
+    side,
+    height_cells,
+    tile,
+    rotation_deg=0,
+    flip_x=False,
+    flip_y=False,
+):
+    """Raise a wall of ``height_cells`` rows along one edge of a run of floor cells.
+
+    ``plane`` must be ``"XY"`` and ``plane_offset_m`` is the floor's z (a whole number of cell heights): the
+    wall's rows start there. ``from_cell`` / ``to_cell`` (inclusive, any order) share a row for side ``"N"``
+    (wall on XZ at ``(y + 1) * cell_height``) or a column for side ``"W"`` (wall on YZ at
+    ``x * cell_width``, which needs square tiles). ``"S"`` and ``"E"`` would need walls facing +Y / -X, which
+    the planes cannot express; build so the open sides face -Y and +X. ``tile`` is ``[column, row]`` or a
+    name allowed on the wall plane. Returns ``{built, remapped, face_count, wall_plane, wall_offset_m}``.
+    """
+    obj = _mesh_object(object_name)
+    tileset = _find_tileset(material_name)
+    if _as_plane(plane) != "XY":
+        raise ValueError(f"plane must be 'XY' (the floor the wall rises from), got {plane!r}")
+    offset = _as_float("plane_offset_m", plane_offset_m)
+    from_x, from_y = _as_int_tuple("from_cell", from_cell, 2)
+    to_x, to_y = _as_int_tuple("to_cell", to_cell, 2)
+    if side not in _EXTRUDE_SIDES:
+        raise ValueError(f"side must be one of {list(_EXTRUDE_SIDES)}, got {side!r}")
+    if side in ("S", "E"):
+        facing = "+Y" if side == "S" else "-X"
+        raise ValueError(
+            f"side {side} needs a {facing}-facing wall, which planes XY/XZ/YZ cannot express; "
+            "build so the open sides face -Y and +X"
+        )
+    height = _as_int("height_cells", height_cells)
+    if height < 1:
+        raise ValueError(f"height_cells must be >= 1, got {height_cells!r}")
+    rotation = _as_rotation(rotation_deg)
+    flip_x = _as_bool("flip_x", flip_x)
+    flip_y = _as_bool("flip_y", flip_y)
+    cell_w, cell_h = _cell_size_m(obj, tileset)
+    base_row = _whole_cells("plane_offset_m", offset, cell_h)
+    rows = range(base_row, base_row + height)
+    if side == "N":
+        if from_y != to_y:
+            raise ValueError(f"side N needs from_cell and to_cell in the same row, got y {from_y} and {to_y}")
+        wall_plane = "XZ"
+        wall_offset = (from_y + 1) * cell_h
+        cells = [(x, z) for z in rows for x in range(min(from_x, to_x), max(from_x, to_x) + 1)]
+    else:
+        if from_x != to_x:
+            raise ValueError(f"side W needs from_cell and to_cell in the same column, got x {from_x} and {to_x}")
+        _require_square_cells("A 'W' wall", obj, tileset)
+        wall_plane = "YZ"
+        wall_offset = from_x * cell_w
+        cells = [(y, z) for z in rows for y in range(min(from_y, to_y), max(from_y, to_y) + 1)]
+    tile_xy = _as_tile(tileset, "tile", tile, wall_plane)
+    placements = [
+        {
+            "cell_xy": cell,
+            "tile_xy": tile_xy,
+            "plane": wall_plane,
+            "plane_offset_m": wall_offset,
+            "rotation_deg": rotation,
+            "flip_x": flip_x,
+            "flip_y": flip_y,
+        }
+        for cell in cells
+    ]
+    reports, face_count = _placement_parts(obj, tileset, [("wall", placements)])
+    return {
+        "built": reports["wall"]["built"],
+        "remapped": reports["wall"]["remapped"],
+        "face_count": face_count,
+        "wall_plane": wall_plane,
+        "wall_offset_m": round(wall_offset, 6),
+    }
+
+
+def move_faces(object_name, face_indices, delta_px):
+    """Translate faces by whole world pixels and re-apply their UVs, so the textures stay consistent.
+
+    ``delta_px`` is ``(dx, dy, dz)`` in integer pixels of the object's pixel density: each moved vertex
+    shifts by ``delta_px / pixels_per_unit`` metres in world space. Vertices shared with faces that are not
+    moved move too (no edge is split), so neighbours deform as with Blender's G. Each moved face's UVs are
+    rebuilt from the tile data stored on it (grid, tile and span, orientation, layer) through the path
+    :func:`paint_faces` uses, so ``tile_xy``, ``rotation_deg``, ``flip_x``, ``flip_y`` and ``layer`` read
+    back unchanged. A face without tile data is refused: give it a tile with :func:`paint_faces` first.
+    ``face_indices`` are mesh face indices as listed by :func:`describe_tile_object`.
+    Returns ``{moved, face_count}``.
+    """
+    obj = _mesh_object(object_name)
+    if isinstance(face_indices, (str, bytes, dict)) or not hasattr(face_indices, "__iter__"):
+        raise ValueError(f"face_indices must be a list of integers, got {type(face_indices).__name__}")
+    indices = [_as_int(f"face_indices[{i}]", value) for i, value in enumerate(face_indices)]
+    if not indices:
+        raise ValueError("face_indices is empty")
+    delta = _as_int_tuple("delta_px", delta_px, 3)
+    sprytile_utils.ensure_scene_setup(bpy.context.scene)
+
+    scene = bpy.context.scene
+    ppu = _object_pixels_per_unit(obj, scene)
+    world_delta = Vector(delta) / ppu
+    local_delta = obj.matrix_world.to_3x3().inverted_safe() @ world_delta
+    normal_matrix = obj.matrix_world.to_3x3().inverted_safe().transposed()
+    unique = sorted(set(indices))
+
+    with _edit_session(obj):
+        context, builder = _prepare_builder(obj)
+        mesh = builder.bmesh
+        face_count = len(mesh.faces)
+        for index in unique:
+            if not 0 <= index < face_count:
+                raise ValueError(f"face index {index} is out of range 0-{face_count - 1}")
+        grid_layer = mesh.faces.layers.int.get(UvDataLayers.GRID_INDEX)
+        tile_layer = mesh.faces.layers.int.get(UvDataLayers.GRID_TILE_ID)
+        width_layer = mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_WIDTH)
+        height_layer = mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_HEIGHT)
+        origin_layer = mesh.faces.layers.int.get(UvDataLayers.GRID_SEL_ORIGIN)
+        paint_layer = mesh.faces.layers.int.get(UvDataLayers.PAINT_SETTINGS)
+        work_layer = mesh.faces.layers.int.get(UvDataLayers.WORK_LAYER)
+        tileset_cache = {}
+        plans = []
+        for index in unique:
+            face = mesh.faces[index]
+            tileset = _cached_tileset(obj, face[grid_layer], tileset_cache)
+            if tileset is None:
+                raise ValueError(
+                    f"face {index} has no tile data (no tileset grid); give it a tile with paint_faces first"
+                )
+            tile_id = face[tile_layer]
+            span_x = max(1, face[width_layer])
+            span_y = max(1, face[height_layer])
+            origin_id = face[origin_layer]
+            # Same fallbacks as _face_tile_xy: data from before origin/width/height existed
+            if origin_id == -1 or (origin_id == 0 and face[height_layer] == 0 and face[width_layer] == 0):
+                origin_id = tile_id
+            row_size = tileset.row_size
+            rotation, orient_x, orient_y = _decode_orientation(face[paint_layer])
+            plans.append(
+                {
+                    "index": index,
+                    "tileset": tileset,
+                    "tile_coord": (tile_id % row_size, tile_id // row_size),
+                    "origin": (origin_id % row_size, origin_id // row_size),
+                    "span": (span_x, span_y),
+                    "rotation": rotation,
+                    "flips": _sprytile_flips(rotation, orient_x, orient_y),
+                    "decal": face[work_layer] != 0,
+                }
+            )
+
+        with ExitStack() as stack:
+            grids = {}
+            for plan in plans:
+                grids.setdefault(plan["tileset"].grid.id, plan["tileset"].grid)
+            for grid in grids.values():
+                data = stack.enter_context(_preserved_settings(obj, grid))
+            data.world_pixels = ppu
+            data.paint_mode = "MAKE_FACE"
+            data.paint_align = "CENTER"
+            data.work_layer_mode = "MESH_DECAL"
+
+            moved_verts = {vert for index in unique for vert in mesh.faces[index].verts}
+            for vert in moved_verts:
+                vert.co += local_delta
+            mesh.normal_update()
+
+            for plan in plans:
+                grid = plan["tileset"].grid
+                span_x, span_y = plan["span"]
+                origin_x, origin_y = plan["origin"]
+                obj.sprytile_gridid = grid.id
+                data.uv_flip_x, data.uv_flip_y = plan["flips"]
+                data.mesh_rotate = math.radians(plan["rotation"])
+                data.work_layer = "DECAL_1" if plan["decal"] else "BASE"
+                grid.tile_selection = (origin_x, origin_y, span_x, span_y)
+                world_normal = (normal_matrix @ mesh.faces[plan["index"]].normal).normalized()
+                right, up = _face_frame(world_normal)
+                uv_right, uv_up = _rotated_frame(right, up, plan["rotation"])
+                painted_index, _ = sprytile_uv.uv_map_face(
+                    context,
+                    uv_up,
+                    uv_right,
+                    plan["tile_coord"],
+                    plan["origin"],
+                    plan["index"],
+                    mesh,
+                    plan["span"],
+                )
+                if painted_index is None:
+                    raise RuntimeError(f"Could not remap the UVs of face {plan['index']}; is it hidden?")
+    return {"moved": len(unique), "face_count": face_count}
+
 
 
 # ---------------------------------------------------------------------------

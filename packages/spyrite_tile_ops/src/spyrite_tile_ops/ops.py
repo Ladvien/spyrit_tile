@@ -49,6 +49,9 @@ __all__ = [
     "fill_pattern",
     "remove_tiles",
     "paint_faces",
+    "build_room",
+    "extrude_edge",
+    "move_faces",
     "tile_object_report",
     "scene_report",
     "select_tile_faces",
@@ -111,6 +114,20 @@ class TileEditReport:
     remapped: int = 0
     removed: int = 0
     painted: int = 0
+    moved: int = 0
+
+
+@dataclass(frozen=True)
+class RoomReport:
+    """What build_room built: the floor, each wall by name ('back', 'left'), the ceiling (None when not asked) and the object's face count.
+
+    Each part reports its `built` and `remapped` faces; its `face_count` is the object's total after the room.
+    """
+
+    floor: TileEditReport
+    walls: dict[str, TileEditReport]
+    ceiling: TileEditReport | None
+    face_count: int
 
 
 @dataclass(frozen=True)
@@ -355,6 +372,7 @@ def _edit_report(result: dict) -> TileEditReport:
         remapped=int(result.get("remapped", 0)),
         removed=int(result.get("removed", 0)),
         painted=int(result.get("painted", 0)),
+        moved=int(result.get("moved", 0)),
     )
 
 
@@ -555,6 +573,91 @@ def paint_faces(
         rotation_deg=float(rotation_deg),
         flip_x=flip_x,
         flip_y=flip_y,
+    )
+    return _edit_report(result)
+
+
+def build_room(
+    object_name: str,
+    tileset_name: str,
+    size_cells: tuple[int, int, int],
+    floor_tile: tuple[int, int] | str,
+    wall_tile: tuple[int, int] | str,
+    walls: tuple[Literal["back", "left"], ...] = ("back", "left"),
+    origin_cell: tuple[int, int] = (0, 0),
+    floor_offset_m: float = 0.0,
+    ceiling_tile: tuple[int, int] | str | None = None,
+) -> RoomReport:
+    """Build a floor, a back (XZ) and a left (YZ) wall and an optional ceiling in one atomic call.
+
+    size_cells is (width, depth, height) in cells; origin_cell the floor's minimum (x, y) cell. Only back/left walls exist
+    because planes have fixed normals: build the room so its open sides face -Y and +X. A left wall needs square tiles.
+    """
+    result = _addon_api().build_room(
+        object_name=object_name,
+        material_name=tileset_name,
+        size_cells=list(size_cells),
+        floor_tile=floor_tile,
+        wall_tile=wall_tile,
+        walls=list(walls),
+        origin_cell=list(origin_cell),
+        floor_offset_m=floor_offset_m,
+        ceiling_tile=ceiling_tile,
+    )
+    return RoomReport(
+        floor=_edit_report(result["floor"]),
+        walls={name: _edit_report(part) for name, part in result["walls"].items()},
+        ceiling=None if result["ceiling"] is None else _edit_report(result["ceiling"]),
+        face_count=int(result["face_count"]),
+    )
+
+
+def extrude_edge(
+    object_name: str,
+    tileset_name: str,
+    from_cell: tuple[int, int],
+    to_cell: tuple[int, int],
+    side: Literal["N", "S", "E", "W"],
+    count: int,
+    tile: tuple[int, int] | str,
+    plane: Literal["XY"] = "XY",
+    plane_offset_m: float = 0.0,
+    rotation_deg: float = 0.0,
+    flip_x: bool = False,
+    flip_y: bool = False,
+) -> TileEditReport:
+    """Raise a wall `count` cells high along the N or W edge of a run of floor cells.
+
+    N puts the wall on XZ at (y + 1) cells, W on YZ at x cells (square tiles only). plane_offset_m is the floor's z, a
+    whole number of cell heights. Sides S and E need walls facing +Y / -X, which no plane has.
+    """
+    _check_rotation_deg(rotation_deg)
+    result = _addon_api().extrude_edge(
+        object_name=object_name,
+        material_name=tileset_name,
+        plane=plane,
+        plane_offset_m=plane_offset_m,
+        from_cell=list(from_cell),
+        to_cell=list(to_cell),
+        side=side,
+        height_cells=count,
+        tile=tile,
+        rotation_deg=float(rotation_deg),
+        flip_x=flip_x,
+        flip_y=flip_y,
+    )
+    return _edit_report(result)
+
+
+def move_faces(
+    object_name: str, face_indices: list[int], delta_px: tuple[int, int, int]
+) -> TileEditReport:
+    """Move faces (indices from tile_object_report) by whole world pixels and rebuild their UVs from their tile data.
+
+    Vertices shared with faces that stay put move too, so neighbours deform.
+    """
+    result = _addon_api().move_faces(
+        object_name=object_name, face_indices=list(face_indices), delta_px=list(delta_px)
     )
     return _edit_report(result)
 

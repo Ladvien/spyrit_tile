@@ -43,8 +43,8 @@ Three pieces, all in this repository:
 
 | Piece | Where it runs | What it does |
 |---|---|---|
-| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec` |
-| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `set_pixel_art_view`, `build_spec`, `export_spec` |
+| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec` |
+| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `set_pixel_art_view`, `build_spec`, `export_spec` |
 | `packages/spyrite_tile_gen` | on the host | MCP server `spyrite-tile-gen`: `generate_tile`, `generate_sprite`, `generate_tileset` (Retro Diffusion, paid, needs `RD_API_KEY`; or the local SDXL service), `normalize_image`, `compose_atlas`, `estimate_cost`, `list_backends` |
 | `services/pixel_server` | GPU host | FastAPI SDXL + pixel-art LoRA service behind the `local` backend (systemd user unit `spyrite-pixel.service`, port 8190) |
 
@@ -88,6 +88,13 @@ objects:
 
 Unknown keys are errors listing the valid ones; error messages start with the dotted path
 (`objects.room.tiles[3].tile: ...`). A failed object is rolled back; earlier tilesets and objects stay.
+
+Composites: `build_room(size_cells=(w, d, h), floor_tile, wall_tile, walls=("back", "left"), ceiling_tile=...)` builds a
+floor, a back wall (XZ, normal -Y) and a left wall (YZ, normal +X) and an optional ceiling in one atomic call;
+`extrude_edge(plane="XY", from_cell, to_cell, side="N"|"W", height_cells, tile)` raises a wall along a run of floor
+cells; `move_faces(face_indices, delta_px=(dx, dy, dz))` shifts faces by whole pixels and rebuilds their UVs from the
+tile data stored on them. The planes have fixed normals, so only back/left walls and N/W edges exist: build rooms
+whose open sides face -Y and +X.
 
 Tests: `make test-pure` (generation package), `make blender-test-deps && make test-blender`
 (add-on API and blended ops inside Blender 5.2, isolated from your user config), and
