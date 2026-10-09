@@ -390,6 +390,16 @@ class VIEW3D_OP_SprytileGui(bpy.types.Operator):
         context.area.tag_redraw()
         return {ret_val}
 
+    def cancel(self, context):
+        """Blender calls this, not modal(), when it drops a running modal operator.
+
+        Loading another file (open, revert, new) does that to the palette without
+        ever reaching exit(). is_running then stayed True, the gizmo group only
+        starts the GUI when it is False, and the draw handler kept the old
+        tileset, so the palette stayed gone until Blender was restarted (#135).
+        """
+        self.exit(context)
+
     def exit(self, context):
         VIEW3D_OP_SprytileGui.handler_remove(self, context)
         VIEW3D_OP_SprytileGui.free_offscreen()
