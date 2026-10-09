@@ -231,14 +231,15 @@ class TileFaceReading:
     cell_xy: tuple[int, int] | None
     on_grid: bool
     tileset: str
-    tile: str | None
 
 
 @dataclass(frozen=True)
 class TileObjectReading:
-    """A tile object's faces; `truncated` is true when the face list was capped."""
+    """A tile object's faces; `truncated` is true when the face list was capped; `overlay_of` names the base
+    object when this is an overlay (its `plane_offset_m` values are then lifted by the overlay's lift), else None."""
 
     object_name: str
+    overlay_of: str | None
     face_count: int
     truncated: bool
     faces: tuple[TileFaceReading, ...]
@@ -769,6 +770,7 @@ def tile_object_report(object_name: str) -> TileObjectReading:
     result = _addon_api().describe_tile_object(object_name=object_name)
     return TileObjectReading(
         object_name=result["object_name"],
+        overlay_of=result["overlay_of"],
         face_count=int(result["face_count"]),
         truncated=bool(result["truncated"]),
         faces=tuple(
