@@ -15,6 +15,7 @@ from bpy.path import abspath
 from datetime import datetime
 from os import path
 from . import sprytile_modal
+from . import sprytile_builder
 from . import sprytile_preview
 
 
@@ -1723,7 +1724,7 @@ class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
             # Get if user is holding down tile picker modifier
             check_modifier = event.alt
 
-            location, normal, face_index, distance = sprytile_modal.VIEW3D_OP_SprytileModalTool.raycast_object(context.object, ray_origin, ray_vector)
+            location, normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object, ray_origin, ray_vector)
             if location is None:
                 if check_modifier:
                    scene.sprytile_data.lock_normal = False
@@ -1759,7 +1760,7 @@ class UTIL_OP_SprytileSnapCursor(bpy.types.Operator):
                sprytile_data = context.scene.sprytile_data
                # Check if mouse is hitting object
                target_normal = context.object.matrix_world.to_quaternion() @ normal
-               face_up_vector, face_right_vector = sprytile_modal.VIEW3D_OP_SprytileModalTool.get_face_up_vector(context.object, context, face_index, 0.4)
+               face_up_vector, face_right_vector = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index, 0.4)
                if face_up_vector is not None:
                    sprytile_data.paint_normal_vector = target_normal
                    sprytile_data.paint_up_vector = face_up_vector
@@ -1813,7 +1814,7 @@ class UTIL_OP_SprytileTilePicker(bpy.types.Operator):
         ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
 
         work_layer_mask = get_work_layer_data(context.scene.sprytile_data)
-        location, normal, face_index, distance = sprytile_modal.VIEW3D_OP_SprytileModalTool.raycast_object(context.object, ray_origin,
+        location, normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object, ray_origin,
                                                                      ray_vector, work_layer_mask=work_layer_mask)
         if location is None:
             return None
@@ -1888,12 +1889,12 @@ class UTIL_OP_SprytileSetNormal(bpy.types.Operator):
                 ray_vector = view3d_utils.region_2d_to_vector_3d(region, rv3d, coord)
                 ray_origin = view3d_utils.region_2d_to_origin_3d(region, rv3d, coord)
 
-                hit_loc, hit_normal, face_index, distance = sprytile_modal.VIEW3D_OP_SprytileModalTool.raycast_object(context.object, ray_origin, ray_vector)
+                hit_loc, hit_normal, face_index, distance = sprytile_builder.TileBuilder.raycast_object(context.object, ray_origin, ray_vector)
                 if hit_loc is None:
                     return {'RUNNING_MODAL'}
                 hit_normal = context.object.matrix_world.to_quaternion() @ hit_normal
 
-                face_up_vector, face_right_vector = sprytile_modal.VIEW3D_OP_SprytileModalTool.get_face_up_vector(context.object, context, face_index)
+                face_up_vector, face_right_vector = sprytile_builder.TileBuilder.get_face_up_vector(context.object, context, face_index)
                 if face_up_vector is None:
                     return {'RUNNING_MODAL'}
 
