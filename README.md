@@ -43,8 +43,8 @@ Three pieces, all in this repository:
 
 | Piece | Where it runs | What it does |
 |---|---|---|
-| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `checkpoint` / `rollback` / `discard_checkpoint` / `list_checkpoints` (session-only snapshots of tile objects), `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec`, `verify_tile_object` (renders with Workbench and checks every visible face's pixels against its tile) |
-| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `verify_tile_object`, `checkpoint`, `rollback`, `discard_checkpoint`, `list_checkpoints`, `set_pixel_art_view`, `build_spec`, `export_spec` |
+| `addon/spyrite_tile/api.py` | inside Blender | Headless tile API: `create_tileset`, `create_tile_object`, `create_overlay_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `describe_tile_object` (per face: tile, span, rotation, flips, layer, plane, cell, offset, `on_grid`), `describe_scene`, `checkpoint` / `rollback` / `discard_checkpoint` / `list_checkpoints` (session-only snapshots of tile objects), `select_faces` (filter faces by tile/tag/plane/offset/cell rect/layer/facing or flood a connected region; feed the indices to `paint_faces`), `build_spec`, `export_spec`, `verify_tile_object` (renders with Workbench and checks every visible face's pixels against its tile), `reload_core` (re-executes the class-free modules without a restart). A few parameters have different names in the ops below (api `material_name` is op `tileset_name`, `object_names` is `objects`, `height_cells` is `count`, `select_faces` is `select_tile_faces`); this section uses the op names, which are what an MCP agent calls |
+| `packages/spyrite_tile_ops` | inside Blender, via blended | blended op plugin (entry point `blended.ops`) exposing the API as the tools `import_tileset`, `create_tile_object`, `create_overlay_object`, `place_tiles`, `fill_tiles`, `fill_pattern` (seeded random, stamp, autotile), `remove_tiles`, `paint_faces`, `build_room`, `extrude_edge`, `move_faces`, `tile_object_report`, `scene_report`, `select_tile_faces`, `verify_tile_object`, `checkpoint`, `rollback`, `discard_checkpoint`, `list_checkpoints`, `set_pixel_art_view`, `build_spec`, `export_spec`, `reload_core` |
 | `packages/spyrite_tile_gen` | on the host | MCP server `spyrite-tile-gen`: `generate_tile`, `generate_sprite`, `generate_tileset` (Retro Diffusion, paid, needs `RD_API_KEY`; or the local SDXL service), `normalize_image`, `compose_atlas`, `estimate_cost`, `list_backends` |
 | `services/pixel_server` | GPU host | FastAPI SDXL + pixel-art LoRA service behind the `local` backend (systemd user unit `spyrite-pixel.service`, port 8190) |
 
@@ -79,7 +79,7 @@ and a malformed sidecar fails `import_tileset` (naming the file) before anything
 `compose_atlas(names=[...], planes_by_name={...})` writes the sidecar for you. The YAML parser is
 vendored (`addon/spyrite_tile/_vendor/yaml`, PyYAML 6.0.3, MIT) because Blender's Python has none.
 
-Specs: `build_spec(spec_path)` builds a whole scene from a YAML file and `export_spec(object_names, spec_path)`
+Specs: `build_spec(spec_path)` builds a whole scene from a YAML file and `export_spec(objects, spec_path)`
 writes tile objects back to one (faces that are not whole-cell rectangles are listed, not written).
 Both paths are absolute; tileset `image` paths are relative to the spec. Schema (see
 `tests/fixtures/room.spyrite.yaml`, which builds a 50-face room with named tiles):
@@ -104,7 +104,7 @@ Unknown keys are errors listing the valid ones; error messages start with the do
 
 Composites: `build_room(size_cells=(w, d, h), floor_tile, wall_tile, walls=("back", "left"), ceiling_tile=...)` builds a
 floor, a back wall (XZ, normal -Y) and a left wall (YZ, normal +X) and an optional ceiling in one atomic call;
-`extrude_edge(plane="XY", from_cell, to_cell, side="N"|"W", height_cells, tile)` raises a wall along a run of floor
+`extrude_edge(from_cell, to_cell, side="N"|"W", count, tile)` raises a wall `count` cells high along a run of floor
 cells; `move_faces(face_indices, delta_px=(dx, dy, dz))` shifts faces by whole pixels and rebuilds their UVs from the
 tile data stored on them. The planes have fixed normals, so only back/left walls and N/W edges exist: build rooms
 whose open sides face -Y and +X.

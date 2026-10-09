@@ -44,7 +44,7 @@ test-blender:
 # Drive the Blender you have OPEN through blended's MCP server (the agent's path):
 # builds `spyrite_smoke_room`, textures the viewport, asserts faces/tiles, saves a
 # screenshot to outputs/live_smoke/. Needs the mcp add-on server running in Blender.
-# ARGS=--reload-api picks up add-on sprytile_uv.py, sprytile_builder.py and api.py edits without restarting Blender.
+# ARGS=--reload-api picks up add-on sprytile_core.py, sprytile_uv.py, sprytile_builder.py, spyrite_spec.py, spyrite_probe.py and api.py edits without restarting Blender.
 test-live:
 	/Users/ladvien/blended/.venv/bin/python scripts/mcp_live_smoke.py $(ARGS)
 

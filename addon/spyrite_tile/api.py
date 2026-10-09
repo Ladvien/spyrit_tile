@@ -118,6 +118,17 @@ Tile names
     as well as ``[column, row]``; a name whose ``planes`` exclude the placement plane is refused.
     ``create_tileset`` reports ``tile_names`` and ``describe_tile_object`` faces carry ``tile``.
 
+Selecting
+    :func:`select_faces` returns the indices of the faces matching a ``where`` filter (tile, tiles, tag, plane,
+    plane_offset_m, a cell rectangle, layer, facing, or a region connected to a cell); it reads only. Feed the
+    indices to :func:`paint_faces` or :func:`move_faces`. The blended op is ``select_tile_faces``.
+
+Reloading
+    :func:`reload_core` re-executes ``sprytile_core, sprytile_uv, sprytile_builder, spyrite_spec,
+    spyrite_probe`` and ``api`` in place so edits to them apply without restarting Blender (the blended op is
+    ``reload_core``); registered-class modules still need a restart. Session state held in those modules
+    (removed-tileset set, checkpoint registry) is forgotten.
+
 Pattern fills
     :func:`fill_pattern` fills a rectangle or an explicit cell list with a ``random`` (seeded), ``stamp``
     or ``autotile`` (``edges4``, keys ``"0".."15"``) pattern through one :func:`place_tiles` call.
@@ -167,6 +178,15 @@ __all__ = [
     "set_pixel_art_view",
     "verify_tile_object",
     "reload_core",
+    "create_overlay_object",
+    "fill_pattern",
+    "select_faces",
+    "build_spec",
+    "export_spec",
+    "checkpoint",
+    "rollback",
+    "discard_checkpoint",
+    "list_checkpoints",
 ]
 
 # Modules reload_core re-executes, in dependency order (api last).
@@ -1752,7 +1772,7 @@ def _tile_name(tileset, tile_xy):
 def describe_tile_object(object_name, max_faces=500):
     """Read back the geometry and orientation of a tile object.
 
-    Returns ``{object_name, face_count, truncated, faces}`` where each face (the first ``max_faces`` by index)
+    Returns ``{object_name, overlay_of, face_count, truncated, faces}`` where each face (the first ``max_faces`` by index)
     is a dict in world space with:
 
     - ``index``, ``center_m``, ``normal`` and ``material`` (the face's material name, '' if none);
@@ -2285,10 +2305,10 @@ def export_spec(object_names, spec_path):
     Returns ``{spec_path, objects: n, tiles: n, unexported_faces: {object_name: [face indices]}}``.
     """
     if isinstance(object_names, (str, bytes)) or not hasattr(object_names, "__iter__"):
-        raise ValueError(f"object_names must be a list of object names, got {object_names!r}")
+        raise ValueError(f"object_names (op: objects) must be a list of object names, got {object_names!r}")
     object_names = list(dict.fromkeys(object_names))
     if not object_names:
-        raise ValueError("object_names is empty; name at least one tile object")
+        raise ValueError("object_names (op: objects) is empty; name at least one tile object")
     if not isinstance(spec_path, (str, os.PathLike)):
         raise ValueError(f"spec_path must be a path, got {spec_path!r}")
     spec_path = os.fspath(spec_path)
@@ -2721,7 +2741,7 @@ def checkpoint(object_names=None, label=""):
     if object_names is None:
         object_names = [o["object_name"] for o in describe_scene()["tile_objects"]]
     elif isinstance(object_names, str) or not isinstance(object_names, (list, tuple)):
-        raise ValueError(f"object_names must be a list of object names or None, got {object_names!r}")
+        raise ValueError(f"object_names (op: objects) must be a list of object names or None, got {object_names!r}")
     object_names = list(object_names)
     if not object_names:
         raise ValueError("No objects to checkpoint: the scene has no tile objects; call create_tile_object first")
